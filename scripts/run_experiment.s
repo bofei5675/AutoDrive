@@ -2,7 +2,7 @@
 #SBATCH --job-name=auto_drive
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=2
-#SBATCH --time=12:30:00
+#SBATCH --time=24:30:00
 #SBATCH --mem=16GB
 #SBATCH --gres=gpu:1
 

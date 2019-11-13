@@ -46,8 +46,6 @@ camera_matrix = np.array([[2304.5479, 0,  1686.2379],
                           [0, 0, 1]], dtype=np.float32)
 camera_matrix_inv = np.linalg.inv(camera_matrix)
 
-train.head()
-
 def imread(path, fast_mode=False):
     img = cv2.imread(path)
     if not fast_mode and img is not None and len(img.shape) == 3:
@@ -217,9 +215,6 @@ def convert_3d_to_2d(x, y, z, fx=2304.5479, fy=2305.8757, cx=1686.2379, cy=1354.
 
 
 def optimize_xy(r, c, x0, y0, z0):
-    nonlocal IMG_SHAPE, MODEL_SCALE
-
-
     def distance_fn(xyz):
         x, y, z, IMG_SHAPE, MODEL_SCALE = xyz
         x, y = convert_3d_to_2d(x, y, z0)
@@ -328,12 +323,16 @@ class double_conv(nn.Module):
 
 
 class up(nn.Module):
-    def __init__(self, in_ch, mid_ch,out_ch):
+    def __init__(self, in_ch, mid_ch,out_ch, bilinear=True):
         super(up, self).__init__()
 
         #  would be a nice idea if the upsampling could be learned too,
         #  but my machine do not have enough memory to handle all those weights
-        self.up = nn.ConvTranspose2d(in_ch, in_ch, 2, stride=2)
+        if bilinear:
+            self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        else:
+            # self.up = nn.ConvTranspose2d(in_ch // 2, in_ch // 2, 2, stride=2)
+            self.up = nn.ConvTranspose2d(in_ch, in_ch, 2, stride=2)
 
         self.conv = double_conv(mid_ch, out_ch)
 
