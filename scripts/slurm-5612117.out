@@ -1,4 +1,0 @@
-Traceback (most recent call last):
-  File "center_net.py", line 20, in <module>
-    from efficientnet_pytorch import EfficientNet
-ModuleNotFoundError: No module named 'efficientnet_pytorch'
