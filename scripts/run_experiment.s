@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=auto_drive
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=2
+#SBATCH --cpus-per-task=4
 #SBATCH --time=24:30:00
 #SBATCH --mem=16GB
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:p40:1
 
 source activate capstone
 cd ../
-python center_net.py
+python main.py -m HG -sd run/ -j 2

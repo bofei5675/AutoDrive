@@ -99,7 +99,7 @@ def rotate(x, angle):
 
 IMG_WIDTH = 2048 - 512
 IMG_HEIGHT = IMG_WIDTH // 16 * 5
-MODEL_SCALE = 8
+MODEL_SCALE = 4
 
 
 def get_img_coords(s):
@@ -336,3 +336,11 @@ def extract_coords(prediction):
                                                                         coords[-1]['z'])
     coords = clear_duplicates(coords)
     return coords
+
+
+def coords2str(coords, names=['yaw', 'pitch', 'roll', 'x', 'y', 'z', 'confidence']):
+    s = []
+    for c in coords:
+        for n in names:
+            s.append(str(c.get(n, 0)))
+    return ' '.join(s)

@@ -11,7 +11,7 @@ test = pd.read_csv(PATH + 'sample_submission.csv')
 test_images_dir = PATH + 'test_images/{}.jpg'
 df_test = test
 test_dataset = CarDataset(df_test, test_images_dir, training=False)
-load_model = '/scratch/bz1030/auto_drive/saved_bilinear/model_9.pth'
+load_model = '/scratch/bz1030/auto_drive/saved_bilinear/model_19.pth'
 predictions = []
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 if torch.cuda.is_available():
@@ -32,8 +32,9 @@ for img, _, _ in tqdm(test_loader):
         coords = extract_coords(out)
         s = coords2str(coords)
         predictions.append(s)
-
+save_dir = load_model.split('/')[:-1]
+save_dir = '/'.join(load_model)
 test = pd.read_csv(PATH + 'sample_submission.csv')
 test['PredictionString'] = predictions
-test.to_csv('predictions_bilinear.csv', index=False)
+test.to_csv(save_dir + '/predictions.csv', index=False)
 test.head()
