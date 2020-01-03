@@ -11,7 +11,11 @@ test = pd.read_csv(PATH + 'sample_submission.csv')
 test_images_dir = PATH + 'test_images/{}.jpg'
 df_test = test
 test_dataset = CarDataset(df_test, test_images_dir, training=False)
+<<<<<<< HEAD
 load_model = '/scratch/bz1030/auto_drive/run/model_HG2_stack_2_features_256_2020-01-03_01-21-51/model_10.pth'
+=======
+load_model = '/scratch/bz1030/auto_drive/saved/model_3.pth'
+>>>>>>> 958c3ed67d74887374148c8170fdf9cba8f46999
 predictions = []
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 if torch.cuda.is_available():
@@ -27,16 +31,26 @@ print('Start Evaluation ...')
 for img, _, _ in tqdm(test_loader):
     with torch.no_grad():
         output = model(img.to(device))
+<<<<<<< HEAD
     if type(output) is list:
         output = output[-1]
+=======
+>>>>>>> 958c3ed67d74887374148c8170fdf9cba8f46999
     output = output.data.cpu().numpy()
     for out in output:
         coords = extract_coords(out)
         s = coords2str(coords)
         predictions.append(s)
+<<<<<<< HEAD
 save_dir = load_model.split('/')[:-1]
 save_dir = '/'.join(save_dir)
 test = pd.read_csv(PATH + 'sample_submission.csv')
 test['PredictionString'] = predictions
 test.to_csv(save_dir + '/predictions.csv', index=False)
+=======
+
+test = pd.read_csv(PATH + 'sample_submission.csv')
+test['PredictionString'] = predictions
+test.to_csv('predictions.csv', index=False)
+>>>>>>> 958c3ed67d74887374148c8170fdf9cba8f46999
 test.head()

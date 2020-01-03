@@ -169,6 +169,7 @@ def criterion(prediction, mask, regr, size_average=True):
 
     # Regression L1 loss
     pred_regr = prediction[:, 1:]
+    print('Regression:', regr.shape, pred_regr.shape)
     regr_loss = (torch.abs(pred_regr - regr).sum(1) * mask).sum(1).sum(1) / mask.sum(1).sum(1)
     regr_loss = regr_loss.mean(0)
 
@@ -203,7 +204,7 @@ def train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-        exp_lr_scheduler.step()
+        # exp_lr_scheduler.step()
         if batch_idx % 20 == 0 or batch_idx == total_batches - 1:
             with open(save_dir + 'log.txt', 'a+') as f:
                 line = '{} | {} | Total Loss: {:.4f}, Stack Loss:{}\n'\
