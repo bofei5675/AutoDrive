@@ -99,11 +99,7 @@ def rotate(x, angle):
 
 IMG_WIDTH = 2048 - 512
 IMG_HEIGHT = IMG_WIDTH // 16 * 5
-<<<<<<< HEAD
 MODEL_SCALE = 4
-=======
-MODEL_SCALE = 8
->>>>>>> 958c3ed67d74887374148c8170fdf9cba8f46999
 
 
 def get_img_coords(s):
@@ -339,7 +335,6 @@ def extract_coords(prediction):
         coords[-1]['x'], coords[-1]['y'], coords[-1]['z'] = optimize_xy(r, c, coords[-1]['x'], coords[-1]['y'],
                                                                         coords[-1]['z'])
     coords = clear_duplicates(coords)
-<<<<<<< HEAD
     return coords
 
 
@@ -372,6 +367,3 @@ def load_my_state_dict(model, state_dict):
         count +=1
 
     print('Load Successful {} / {}'.format(count, len(own_state.keys())))
-=======
-    return coords
->>>>>>> 958c3ed67d74887374148c8170fdf9cba8f46999

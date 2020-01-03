@@ -6,11 +6,7 @@ saved
 data
 # C extensions
 *.so
-<<<<<<< HEAD
 ./data/
-=======
-
->>>>>>> 958c3ed67d74887374148c8170fdf9cba8f46999
 # Distribution / packaging
 .Python
 build/
@@ -29,14 +25,10 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
-<<<<<<< HEAD
 *.out
 run/
 data/
 saved_bilinear/
-=======
-
->>>>>>> 958c3ed67d74887374148c8170fdf9cba8f46999
 # PyInstaller
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
