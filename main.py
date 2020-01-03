@@ -8,27 +8,29 @@ import gc
 from torchvision.transforms import ToPILImage, ToTensor, RandomRotation, RandomHorizontalFlip,\
     Compose, Resize
 from models.model_hg import HourglassNet
+from models.model_hg2 import PoseNet
 import os
 import time
+import torch.nn as nn
 def parse_args():
     args = argparse.ArgumentParser()
     args.add_argument('-sd', '--save-dir', type=str, dest='save_dir', default='run/')
-    args.add_argument('-m', '--model', type=str, dest='model_type', default='HG',
-                      choices=['UNet', 'HG'])
-    args.add_argument('-ns', '--n-stacks', type=int, dest='num_stacks', default=6)
+    args.add_argument('-m', '--model', type=str, dest='model_type', default='HG2',
+                      choices=['UNet', 'HG', 'HG2'])
+    args.add_argument('-ns', '--n-stacks', type=int, dest='num_stacks', default=8)
     args.add_argument('-nc', '--n-classes',  type=int, dest='num_classes', default=8)
     args.add_argument('-nf', '--n-features', type=int, dest='num_features', default=256)
     args.add_argument('-bs', '--batch_size', type=int, dest='batch_size', default=2)
     args.add_argument('-e', '--epoch', type=int, dest='epoch', default=30)
-    args.add_argument('-j', '--job-type', dest='job_type', default=1, type=int)
+    args.add_argument('-j', '--job-type', dest='job_type', default=2, type=int)
     return args.parse_args()
 
 def main():
     current_time = time.strftime("%Y-%m-%d_%H-%M-%S", time.gmtime())
     args = parse_args()
-    save_dir = args.save_dir + 'model_{}_'.format(args.model_type) + current_time + '/'
+    save_dir = args.save_dir + 'model_{}_stack_{}_features_{}_'.format(args.model_type, args.num_stacks, args.num_features)\
+               + current_time + '/'
     train_images_dir = PATH + 'train_images/{}.jpg'
-    test_images_dir = PATH + 'test_images/{}.jpg'
     train = pd.read_csv(PATH + 'train.csv')  # .sample(n=20).reset_index()
     test = pd.read_csv(PATH + 'sample_submission.csv')
     if not os.path.exists(save_dir):
@@ -37,7 +39,6 @@ def main():
         f.write(str(args))
     # train = train.iloc[:50, :]
     df_train, df_dev = train_test_split(train, test_size=0.05, random_state=42)
-    df_test = test
     # Augmentation
     transform = Compose([
         ToPILImage(),
@@ -47,14 +48,12 @@ def main():
     # Create dataset objects
     train_dataset = CarDataset(df_train, train_images_dir, training=True)
     dev_dataset = CarDataset(df_dev, train_images_dir, training=False)
-    test_dataset = CarDataset(df_test, test_images_dir, training=False)
     BATCH_SIZE = args.batch_size
 
     # Create data generators - they will produce batches
     # transform not using yet
     train_loader = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
     dev_loader = DataLoader(dataset=dev_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=4)
-    test_loader = DataLoader(dataset=test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=4)
     # Gets the GPU if there is one, otherwise the cpu
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(device)
@@ -65,6 +64,17 @@ def main():
     elif args.model_type == 'HG':
         model = HourglassNet(nStacks=args.num_stacks, nModules=1, nFeat=args.num_features, nClasses=args.num_classes)
         model.cuda()
+    elif args.model_type == 'HG2':
+        model = PoseNet(nstack=args.num_stacks, inp_dim=args.num_features, oup_dim=args.num_classes)
+        model = model.cuda()
+        save = torch.load('/scratch/bz1030/auto_drive/weights/checkpoint_2hg.pt')
+        save = save['state_dict']
+        # print(model)
+        #  print(list(save.keys()))
+        # print(model.state_dict().keys())
+        load_my_state_dict(model, save)
+        del save
+
     print('Number of model parameters: {}'.format(
         sum([p.data.nelement() for p in model.parameters()])))
     optimizer = optim.Adam(model.parameters(), lr=0.001)
@@ -84,7 +94,7 @@ def main():
                                                                                                        best_loss)
             f.write(line)
         history.to_csv(save_dir + 'history.csv', index=False)
-        
+
 
 if __name__ == '__main__':
     main()

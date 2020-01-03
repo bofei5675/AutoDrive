@@ -344,3 +344,26 @@ def coords2str(coords, names=['yaw', 'pitch', 'roll', 'x', 'y', 'z', 'confidence
         for n in names:
             s.append(str(c.get(n, 0)))
     return ' '.join(s)
+
+
+def load_my_state_dict(model, state_dict):
+    own_state = model.state_dict()
+    print('Total Module to load {}'.format(len(own_state.keys())))
+    print('Total Module from weights file {}'.format(len(state_dict.keys())))
+    count = 0
+    for name, param in state_dict.items():
+        if name not in own_state and name.replace('model.module.','') not in own_state:
+            continue
+        if isinstance(param, torch.nn.Parameter):
+            # backwards compatibility for serialized parameters
+            param = param.data
+        try:
+            own_state[name].copy_(param)
+        except KeyError as e:
+            try:
+                own_state[name.replace('model.module.', '')].copy_(param)
+            except RuntimeError as e:
+                continue
+        count +=1
+
+    print('Load Successful {} / {}'.format(count, len(own_state.keys())))

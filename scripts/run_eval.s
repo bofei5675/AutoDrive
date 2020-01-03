@@ -8,4 +8,4 @@
 
 source activate capstone
 cd ../
-python main.py -m HG2 -sd run/ -j 2 -nc 8 -ns 4 -nf 256
+python make_prediction.py

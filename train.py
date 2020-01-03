@@ -17,7 +17,7 @@ from torchvision import models
 from torchvision import transforms, utils
 from efficientnet_pytorch import EfficientNet
 from utils import camera_matrix, imread, preprocess_image, get_mask_and_regr,\
-    IMG_WIDTH, IMG_HEIGHT, MODEL_SCALE
+    IMG_WIDTH, IMG_HEIGHT, MODEL_SCALE, load_my_state_dict
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -51,7 +51,6 @@ class CarDataset(Dataset):
         img0 = imread(img_name, True)
         img = preprocess_image(img0, flip=flip)
         img = np.rollaxis(img, 2, 0)
-
         # Get mask and regression maps
         mask, regr = get_mask_and_regr(img0, labels, flip=False)
         regr = np.rollaxis(regr, 2, 0)
@@ -188,6 +187,7 @@ def train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_
     total_loss = 0
     total_batches = len(train_loader)
     for batch_idx, (img_batch, mask_batch, regr_batch) in enumerate(tqdm(train_loader)):
+        # print('Train loop:', img_batch.shape)
         img_batch = img_batch.to(device)
         mask_batch = mask_batch.to(device)
         regr_batch = regr_batch.to(device)
@@ -232,6 +232,7 @@ def save_model(model, dir, epoch):
         os.makedirs(dir)
 
     torch.save(model, dir + 'model_{}.pth'.format(epoch))
+
 
 def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, history=None):
 
