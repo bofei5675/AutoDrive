@@ -11,7 +11,7 @@ test = pd.read_csv(PATH + 'sample_submission.csv')
 test_images_dir = PATH + 'test_images/{}.jpg'
 df_test = test
 test_dataset = CarDataset(df_test, test_images_dir, training=False)
-load_model = '/scratch/bz1030/auto_drive/run/model_HG_2020-01-01_21-44-39/model_13.pth'
+load_model = '/scratch/bz1030/auto_drive/run/model_HG2_stack_2_features_256_2020-01-03_01-21-51/model_10.pth'
 predictions = []
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 if torch.cuda.is_available():
