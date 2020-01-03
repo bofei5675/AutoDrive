@@ -12,18 +12,20 @@ from models.model_hg2 import PoseNet
 import os
 import time
 import torch.nn as nn
+
+
 def parse_args():
     args = argparse.ArgumentParser()
     args.add_argument('-sd', '--save-dir', type=str, dest='save_dir', default='run/')
     args.add_argument('-m', '--model', type=str, dest='model_type', default='HG2',
                       choices=['UNet', 'HG', 'HG2'])
-    args.add_argument('-ns', '--n-stacks', type=int, dest='num_stacks', default=8)
+    args.add_argument('-ns', '--n-stacks', type=int, dest='num_stacks', default=4)
     args.add_argument('-nc', '--n-classes',  type=int, dest='num_classes', default=8)
     args.add_argument('-nf', '--n-features', type=int, dest='num_features', default=256)
     args.add_argument('-bs', '--batch_size', type=int, dest='batch_size', default=2)
     args.add_argument('-e', '--epoch', type=int, dest='epoch', default=30)
-    args.add_argument('-j', '--job-type', dest='job_type', default=2, type=int)
     return args.parse_args()
+
 
 def main():
     current_time = time.strftime("%Y-%m-%d_%H-%M-%S", time.gmtime())
@@ -67,7 +69,11 @@ def main():
     elif args.model_type == 'HG2':
         model = PoseNet(nstack=args.num_stacks, inp_dim=args.num_features, oup_dim=args.num_classes)
         model = model.cuda()
-        save = torch.load('/scratch/bz1030/auto_drive/weights/checkpoint_2hg.pt')
+        if args.num_stacks <= 2:
+            save = torch.load('/scratch/bz1030/auto_drive/weights/checkpoint_2hg.pt')
+        else:
+            save = torch.load('/scratch/bz1030/auto_drive/weights/checkpoint_8hg.pt')
+
         save = save['state_dict']
         # print(model)
         #  print(list(save.keys()))
@@ -85,8 +91,8 @@ def main():
         torch.cuda.empty_cache()
         gc.collect()
         train_loss = train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_scheduler, history,
-                                 args.job_type)
-        best_loss, eval_loss = evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, history)
+                                 args)
+        best_loss, eval_loss = evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, history, args)
         with open(save_dir + 'log.txt', 'a+') as f:
             line = 'Epoch: {}; Train loss: {:.4f}; Eval Loss: {:.4f}; Best eval loss: {:.4f}\n'.format(epoch,
                                                                                                        train_loss,

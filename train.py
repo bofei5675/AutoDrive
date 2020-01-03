@@ -182,40 +182,32 @@ def criterion(prediction, mask, regr, size_average=True):
 import time
 
 
-def train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_scheduler, history=None, job_type=1):
+def train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_scheduler, history=None, args=None):
     model.train()
     total_loss = 0
     total_batches = len(train_loader)
+    total_stacks = args.num_stacks
+    stack_losses = np.zeros(total_stacks)
     for batch_idx, (img_batch, mask_batch, regr_batch) in enumerate(tqdm(train_loader)):
         # print('Train loop:', img_batch.shape)
         img_batch = img_batch.to(device)
         mask_batch = mask_batch.to(device)
         regr_batch = regr_batch.to(device)
         output = model(img_batch)
-        stack_losses = []
         if type(output) is list:
-            if job_type == 1:
-                for stack_output in output:
-                    optimizer.zero_grad()
-                    loss = criterion(stack_output, mask_batch, regr_batch)
-                    total_loss += loss.item()
-                    stack_losses.append(loss.item())
-                    loss.backward(retain_graph=True)
-                    optimizer.step()
-            elif job_type == 2:
-                loss = 0
-                for stack_output in output:
-                    loss += criterion(stack_output, mask_batch, regr_batch)
-                    stack_losses.append(loss.item()) if len(stack_losses) == 0 else stack_losses.append(loss.item() - stack_losses[-1])
-                total_loss += loss.item()
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+            loss = 0
+            for idx, stack_output in enumerate(output):
+                loss += criterion(stack_output, mask_batch, regr_batch)
+                stack_losses[idx] += loss.item()
+            total_loss += loss.item()
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
         exp_lr_scheduler.step()
         if batch_idx % 20 == 0 or batch_idx == total_batches - 1:
             with open(save_dir + 'log.txt', 'a+') as f:
                 line = '{} | {} | Total Loss: {:.4f}, Stack Loss:{}\n'\
-                    .format(batch_idx + 1, total_batches, total_loss / (batch_idx + 1), stack_losses)
+                    .format(batch_idx + 1, total_batches, total_loss / (batch_idx + 1), stack_losses / (batch_idx + 1))
                 f.write(line)
     if history is not None:
         history.loc[epoch, 'train_loss'] = total_loss / len(train_loader)
@@ -234,30 +226,30 @@ def save_model(model, dir, epoch):
     torch.save(model, dir + 'model_{}.pth'.format(epoch))
 
 
-def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, history=None):
+def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, history=None, args = None):
 
     model.eval()
     total_loss = 0
 
     with torch.no_grad():
+        stack_loss = np.zeros(args.num_stacks)
         for img_batch, mask_batch, regr_batch in dev_loader:
             img_batch = img_batch.to(device)
             mask_batch = mask_batch.to(device)
             regr_batch = regr_batch.to(device)
-
             output = model(img_batch)
 
             if type(output) is list:
-                stack_loss = []
-                for stack_output in output:
+                for idx, stack_output in enumerate(output):
                     loss = criterion(stack_output, mask_batch, regr_batch)
-                    stack_loss.append(loss.item())
+                    stack_loss[idx] += loss.item()
                 total_loss += np.mean(stack_loss)
     total_loss /= len(dev_loader.dataset)
+    stack_loss /= len(dev_loader.dataset)
     if total_loss < best_loss:
         best_loss = total_loss
         save_model(model, save_dir, epoch)
     if history is not None:
         history.loc[epoch, 'dev_loss'] = total_loss
-    print('Dev loss: {:.4f}'.format(total_loss))
+    print('Dev loss: {:.4f}; Stack average loss: {}'.format(total_loss, stack_loss))
     return best_loss, loss.item()

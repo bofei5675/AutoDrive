@@ -92,7 +92,7 @@ class Hourglass(nn.Module):
         low3 = self.low3(low2)
         # up2 = self.up2(low3)
         size = up1.shape[2:]
-        up2 = self.up2(low3, size=size, mode='nearest')
+        up2 = self.up2(low3, size=size, mode='bilinear')
         return up1 + up2
 
 

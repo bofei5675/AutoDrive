@@ -8,4 +8,4 @@
 
 source activate capstone
 cd ../
-python main.py -m HG2 -sd run/ -nc 8 -ns 2 -nf 256
+python main.py -m HG2 -sd run/ -nc 8 -ns 4 -nf 256

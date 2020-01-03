@@ -6,8 +6,7 @@ saved
 data
 # C extensions
 *.so
-run/
-
+./data/
 # Distribution / packaging
 .Python
 build/
@@ -27,7 +26,8 @@ wheels/
 *.egg
 MANIFEST
 *.out
-
+run/
+data/
 # PyInstaller
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
