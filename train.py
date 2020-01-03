@@ -263,8 +263,6 @@ def save_model(model, dir, epoch):
 def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, history=None, args = None):
 
     model.eval()
-    total_loss = 0
-
     with torch.no_grad():
         stack_loss = np.zeros(args.num_stacks)
         for img_batch, mask_batch, regr_batch, heatmap_batch in dev_loader:
@@ -279,7 +277,7 @@ def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, histor
                     loss = criterion(stack_output, mask_batch, regr_batch, heatmap_batch,
                                      size_average=True, loss_type=args.loss_type, alpha=args.alpha, beta=args.beta)
                     stack_loss[idx] += loss.item()
-                total_loss += np.mean(stack_loss)
+    total_loss = np.mean(stack_loss)
     total_loss /= len(dev_loader.dataset)
     stack_loss /= len(dev_loader.dataset)
     if total_loss < best_loss:
