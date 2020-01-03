@@ -1,5 +1,5 @@
 from utils import *
-from train import *
+from train import CarDataset, train_model, evaluate_model
 from torch.optim import lr_scheduler
 from sklearn.model_selection import train_test_split
 import torch
@@ -14,23 +14,40 @@ import time
 import torch.nn as nn
 
 
+def str2bool(v):
+    if isinstance(v, bool):
+       return v
+    if v.lower() in ('yes', 'true', 'True', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'False', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
 def parse_args():
     args = argparse.ArgumentParser()
     args.add_argument('-sd', '--save-dir', type=str, dest='save_dir', default='run/')
     args.add_argument('-m', '--model', type=str, dest='model_type', default='HG2',
                       choices=['UNet', 'HG', 'HG2'])
-    args.add_argument('-ns', '--n-stacks', type=int, dest='num_stacks', default=4)
+    args.add_argument('-ns', '--n-stacks', type=int, dest='num_stacks', default=2)
     args.add_argument('-nc', '--n-classes',  type=int, dest='num_classes', default=8)
     args.add_argument('-nf', '--n-features', type=int, dest='num_features', default=256)
     args.add_argument('-bs', '--batch_size', type=int, dest='batch_size', default=2)
     args.add_argument('-e', '--epoch', type=int, dest='epoch', default=30)
+    args.add_argument('-lf', '--loss-func', type=str,
+                      dest='loss_type', default='BCE', choices=['BCE', 'FL', 'MSE'],
+                      help='Loss function for supervising detection')
+    args.add_argument('-a', '--alpha', type=int, dest='alpha', default=2)
+    args.add_argument('-b', '--beta', type=int, dest='beta', default=4)
+
     return args.parse_args()
 
 
 def main():
     current_time = time.strftime("%Y-%m-%d_%H-%M-%S", time.gmtime())
     args = parse_args()
-    save_dir = args.save_dir + 'model_{}_stack_{}_features_{}_'.format(args.model_type, args.num_stacks, args.num_features)\
+    save_dir = args.save_dir + 'model_{}_stack_{}_features_{}_{}_'.format(args.model_type, args.num_stacks, args.num_features, args.loss_type)\
                + current_time + '/'
     train_images_dir = PATH + 'train_images/{}.jpg'
     train = pd.read_csv(PATH + 'train.csv')  # .sample(n=20).reset_index()
@@ -70,9 +87,9 @@ def main():
         model = PoseNet(nstack=args.num_stacks, inp_dim=args.num_features, oup_dim=args.num_classes)
         model = model.cuda()
         if args.num_stacks <= 2:
-            save = torch.load('/scratch/bz1030/auto_drive/weights/checkpoint_2hg.pt')
+            save = torch.load('./weights/checkpoint_2hg.pt')
         else:
-            save = torch.load('/scratch/bz1030/auto_drive/weights/checkpoint_8hg.pt')
+            save = torch.load('./weights/checkpoint_8hg.pt')
 
         save = save['state_dict']
         # print(model)
@@ -83,7 +100,11 @@ def main():
 
     print('Number of model parameters: {}'.format(
         sum([p.data.nelement() for p in model.parameters()])))
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    if args.loss_type == 'FL':
+        lr = 1e-4
+    else:
+        lr = 1e-3
+    optimizer = optim.Adam(model.parameters(), lr=lr)
     exp_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=max(n_epochs, 10) * len(train_loader) // 3, gamma=0.1)
     history = pd.DataFrame()
     best_loss = 1e6

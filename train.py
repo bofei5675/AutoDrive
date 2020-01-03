@@ -16,10 +16,13 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import models
 from torchvision import transforms, utils
 from efficientnet_pytorch import EfficientNet
-from utils import camera_matrix, imread, preprocess_image, get_mask_and_regr,\
+from utils import imread, preprocess_image, get_mask_and_regr,\
     IMG_WIDTH, IMG_HEIGHT, MODEL_SCALE, load_my_state_dict
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+camera_matrix = np.array([[2304.5479, 0,  1686.2379],
+                          [0, 2305.8757, 1354.9849],
+                          [0, 0, 1]], dtype=np.float32)
 
 
 class CarDataset(Dataset):
@@ -52,10 +55,10 @@ class CarDataset(Dataset):
         img = preprocess_image(img0, flip=flip)
         img = np.rollaxis(img, 2, 0)
         # Get mask and regression maps
-        mask, regr = get_mask_and_regr(img0, labels, flip=False)
+        mask, regr, heatmap = get_mask_and_regr(img0, labels, flip=False)
         regr = np.rollaxis(regr, 2, 0)
 
-        return [img, mask, regr]
+        return [img, mask, regr, heatmap]
 
 
 class double_conv(nn.Module):
@@ -160,16 +163,44 @@ class MyUNet(nn.Module):
         return x
 
 
-def criterion(prediction, mask, regr, size_average=True):
+# pixel wise focal loss
+def focal_loss(pred, true, mask, alpha, beta):
+    pos_loss = mask * (1 - pred) ** alpha * torch.log(pred + 1e-12)
+    neg_loss = ((1 - true) ** beta) * (pred ** alpha) * torch.log(1 - pred + 1e-12)
+    loss = pos_loss + neg_loss
+    loss = loss.mean(0).sum()
+    return loss
+
+def mse_loss(pred, true):
+    diff = (pred - true) ** 2
+    diff = diff.mean(0).sum()
+    return diff
+def criterion(prediction, mask, regr, heatmap, size_average=True, loss_type='BCE', alpha=2, beta=4):
+    '''
+    Implement BCE and pixel-wise focal loss
+    alpha/beta are from center net paper
+    :param prediction:
+    :param mask:
+    :param regr:
+    :param heatmap:
+    :param size_average:
+    :param is_focal_loss:
+    :param alpha:
+    :param beta:
+    :return:
+    '''
     # Binary mask loss
     pred_mask = torch.sigmoid(prediction[:, 0])
-    #     mask_loss = mask * (1 - pred_mask)**2 * torch.log(pred_mask + 1e-12) + (1 - mask) * pred_mask**2 * torch.log(1 - pred_mask + 1e-12)
-    mask_loss = mask * torch.log(pred_mask + 1e-12) + (1 - mask) * torch.log(1 - pred_mask + 1e-12)
-    mask_loss = -mask_loss.mean(0).sum()
-
+    if loss_type=='BCE':
+        #    mask_loss = mask * (1 - pred_mask)**2 * torch.log(pred_mask + 1e-12) + (1 - mask) * pred_mask**2 * torch.log(1 - pred_mask + 1e-12)
+        mask_loss = mask * torch.log(pred_mask + 1e-12) + (1 - mask) * torch.log(1 - pred_mask + 1e-12)
+        mask_loss = -mask_loss.mean(0).sum()
+    elif loss_type == 'FL': # focal loss
+        mask_loss = focal_loss(pred_mask, heatmap, mask, alpha, beta)
+    elif loss_type == 'MSE':
+        mask_loss = mse_loss(pred_mask, heatmap)
     # Regression L1 loss
     pred_regr = prediction[:, 1:]
-    print('Regression:', regr.shape, pred_regr.shape)
     regr_loss = (torch.abs(pred_regr - regr).sum(1) * mask).sum(1).sum(1) / mask.sum(1).sum(1)
     regr_loss = regr_loss.mean(0)
 
@@ -189,16 +220,18 @@ def train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_
     total_batches = len(train_loader)
     total_stacks = args.num_stacks
     stack_losses = np.zeros(total_stacks)
-    for batch_idx, (img_batch, mask_batch, regr_batch) in enumerate(tqdm(train_loader)):
+    for batch_idx, (img_batch, mask_batch, regr_batch, heatmap_batch) in enumerate(tqdm(train_loader)):
         # print('Train loop:', img_batch.shape)
         img_batch = img_batch.to(device)
         mask_batch = mask_batch.to(device)
         regr_batch = regr_batch.to(device)
+        heatmap_batch = heatmap_batch.to(device)
         output = model(img_batch)
         if type(output) is list:
             loss = 0
             for idx, stack_output in enumerate(output):
-                loss += criterion(stack_output, mask_batch, regr_batch)
+                loss += criterion(stack_output, mask_batch, regr_batch, heatmap_batch,
+                                  size_average=True, loss_type=args.loss_type, alpha=args.alpha, beta=args.beta)
                 stack_losses[idx] += loss.item()
             total_loss += loss.item()
             optimizer.zero_grad()
@@ -234,15 +267,17 @@ def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, histor
 
     with torch.no_grad():
         stack_loss = np.zeros(args.num_stacks)
-        for img_batch, mask_batch, regr_batch in dev_loader:
+        for img_batch, mask_batch, regr_batch, heatmap_batch in dev_loader:
             img_batch = img_batch.to(device)
             mask_batch = mask_batch.to(device)
             regr_batch = regr_batch.to(device)
+            heatmap_batch = heatmap_batch.to(device)
             output = model(img_batch)
 
             if type(output) is list:
                 for idx, stack_output in enumerate(output):
-                    loss = criterion(stack_output, mask_batch, regr_batch)
+                    loss = criterion(stack_output, mask_batch, regr_batch, heatmap_batch,
+                                     size_average=True, loss_type=args.loss_type, alpha=args.alpha, beta=args.beta)
                     stack_loss[idx] += loss.item()
                 total_loss += np.mean(stack_loss)
     total_loss /= len(dev_loader.dataset)

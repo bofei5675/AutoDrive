@@ -14,11 +14,13 @@ from torch.optim import lr_scheduler
 from torch.utils.data import Dataset, DataLoader
 from math import sin, cos
 from scipy.optimize import minimize
-PATH = './data/'
 
+PATH = './data/'
+CENTER_NET = True
 camera_matrix = np.array([[2304.5479, 0,  1686.2379],
                           [0, 2305.8757, 1354.9849],
                           [0, 0, 1]], dtype=np.float32)
+
 camera_matrix_inv = np.linalg.inv(camera_matrix)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -135,102 +137,23 @@ def get_mask_and_regr(img, labels, flip=False):
         x = np.round(x).astype('int')
         y = (y + img.shape[1] // 6) * IMG_WIDTH / (img.shape[1] * 4 / 3) / MODEL_SCALE
         y = np.round(y).astype('int')
+        heatmap = np.zeros((IMG_HEIGHT // MODEL_SCALE, IMG_WIDTH // MODEL_SCALE))
+
         if x >= 0 and x < IMG_HEIGHT // MODEL_SCALE and y >= 0 and y < IMG_WIDTH // MODEL_SCALE:
             mask[x, y] = 1
+            mask_try, heatmap_i = gaussian_kernel(IMG_HEIGHT // MODEL_SCALE, IMG_WIDTH // MODEL_SCALE, x, y, SIGMA)
+            assert mask_try[x, y] == 1
+            assert np.abs(heatmap_i[x, y] - 1) < 1e-6
+            heatmap = np.maximum(heatmap, heatmap_i)
             regr_dict = _regr_preprocess(regr_dict, flip)
             regr[x, y] = [regr_dict[n] for n in sorted(regr_dict)]
     if flip:
         mask = np.array(mask[:, ::-1])
         regr = np.array(regr[:, ::-1])
-    return mask, regr
+    return mask, regr, heatmap
 
 
-class CarDataset(Dataset):
-    """Car dataset."""
 
-    def __init__(self, dataframe, root_dir, training=True, transform=None):
-        self.df = dataframe
-        self.root_dir = root_dir
-        self.transform = transform
-        self.training = training
-
-    def __len__(self):
-        return len(self.df)
-
-    def __getitem__(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-
-        # Get image name
-        idx, labels = self.df.values[idx]
-        img_name = self.root_dir.format(idx)
-
-        # Augmentation
-        flip = False
-        if self.training:
-            flip = np.random.randint(2) == 1
-
-        # Read image
-        img0 = imread(img_name, True)
-        img = preprocess_image(img0, flip=flip)
-        img = np.rollaxis(img, 2, 0)
-
-        # Get mask and regression maps
-        mask, regr = get_mask_and_regr(img0, labels, flip=False)
-        regr = np.rollaxis(regr, 2, 0)
-
-        return [img, mask, regr]
-
-
-class double_conv(nn.Module):
-    '''(conv => BN => ReLU) * 2'''
-
-    def __init__(self, in_ch, out_ch):
-        super(double_conv, self).__init__()
-        self.conv = nn.Sequential(
-            nn.Conv2d(in_ch, out_ch, 3, padding=1),
-            nn.BatchNorm2d(out_ch),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_ch, out_ch, 3, padding=1),
-            nn.BatchNorm2d(out_ch),
-            nn.ReLU(inplace=True)
-        )
-
-    def forward(self, x):
-        x = self.conv(x)
-        return x
-
-
-class up(nn.Module):
-    def __init__(self, in_ch, mid_ch,out_ch):
-        super(up, self).__init__()
-
-        #  would be a nice idea if the upsampling could be learned too,
-        #  but my machine do not have enough memory to handle all those weights
-        self.up = nn.ConvTranspose2d(in_ch, in_ch, 2, stride=2)
-
-        self.conv = double_conv(mid_ch, out_ch)
-
-    def forward(self, x1, x2=None):
-        x1 = self.up(x1)
-
-        # input is CHW
-        diffY = x2.size()[2] - x1.size()[2]
-        diffX = x2.size()[3] - x1.size()[3]
-
-        x1 = F.pad(x1, (diffX // 2, diffX - diffX // 2,
-                        diffY // 2, diffY - diffY // 2))
-
-        # for padding issues, see
-        # https://github.com/HaiyongJiang/U-Net-Pytorch-Unstructured-Buggy/commit/0e854509c2cea854e247a9c615f175f76fbb2e3a
-        # https://github.com/xiaopeng-liao/Pytorch-UNet/commit/8ebac70e633bac59fc22bb5195e513d5832fb3bd
-        #print(x1.shape, x2.shape)
-        if x2 is not None:
-            x = torch.cat([x2, x1], dim=1)
-        else:
-            x = x1
-        x = self.conv(x)
-        return x
 
 
 def get_mesh(batch_size, shape_x, shape_y):
@@ -241,53 +164,12 @@ def get_mesh(batch_size, shape_x, shape_y):
     return mesh
 
 
-class MyUNet(nn.Module):
-    '''Mixture of previous classes'''
-
-    def __init__(self, n_classes):
-        super(MyUNet, self).__init__()
-        self.base_model = EfficientNet.from_pretrained('efficientnet-b0')
-
-        self.conv0 = double_conv(5, 64)
-        self.conv1 = double_conv(64, 128)
-        self.conv2 = double_conv(128, 512)
-        self.conv3 = double_conv(512, 1024)
-
-        self.mp = nn.MaxPool2d(2)
-
-        self.up1 = up(1282, 1282 + 1024, 512)
-        self.up2 = up(512, 512 + 512, 256)
-        self.outc = nn.Conv2d(256, n_classes, 1)
-
-    def forward(self, x):
-        batch_size = x.shape[0]
-        mesh1 = get_mesh(batch_size, x.shape[2], x.shape[3])
-        x0 = torch.cat([x, mesh1], 1)
-        x1 = self.mp(self.conv0(x0))
-        x2 = self.mp(self.conv1(x1))
-        x3 = self.mp(self.conv2(x2))
-        x4 = self.mp(self.conv3(x3))
-        #print('Original input:', x.shape)
-        x_center = x[:, :, :, IMG_WIDTH // 8: -IMG_WIDTH // 8]
-        #print('Output:', x_center.shape)
-        feats = self.base_model.extract_features(x_center)
-        #print('Feats:', feats.shape)
-        bg = torch.zeros([feats.shape[0], feats.shape[1], feats.shape[2], feats.shape[3] // 8]).to(device)
-        feats = torch.cat([bg, feats, bg], 3)
-        #print('Processed feats', feats.shape)
-        # Add positional info
-        mesh2 = get_mesh(batch_size, feats.shape[2], feats.shape[3])
-        feats = torch.cat([feats, mesh2], 1)
-        #print(feats.shape, x4.shape)
-        x = self.up1(feats, x4)
-        x = self.up2(x, x3)
-        x = self.outc(x)
-        return x
 
 
 DISTANCE_THRESH_CLEAR = 2
 img = imread(PATH + 'train_images/ID_8a6e65317' + '.jpg')
 IMG_SHAPE = img.shape
+SIGMA = 5
 
 def convert_3d_to_2d(x, y, z, fx=2304.5479, fy=2305.8757, cx=1686.2379, cy=1354.9849):
     # stolen from https://www.kaggle.com/theshockwaverider/eda-visualization-baseline
@@ -364,6 +246,21 @@ def load_my_state_dict(model, state_dict):
                 own_state[name.replace('model.module.', '')].copy_(param)
             except RuntimeError as e:
                 continue
-        count +=1
+        count += 1
 
     print('Load Successful {} / {}'.format(count, len(own_state.keys())))
+
+
+# use a gaussian kernel to spread this 0-1 mask
+def gaussian_kernel(x_total, y_total, x_s, y_s, sigma):
+    mask = np.zeros((x_total, y_total))
+    mask[x_s, y_s] = 1
+    x_index = np.arange(0, x_total)
+    y_index = np.arange(0, y_total)
+    x_index = (x_index - x_s) ** 2
+    y_index = (y_index - y_s) ** 2
+    x_index = x_index.reshape(-1, 1)
+    dist = x_index + y_index
+    # gaussian kernel computation
+    dist = np.exp(- dist / (2*(sigma ** 2)))
+    return mask, dist

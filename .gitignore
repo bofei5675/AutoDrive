@@ -28,6 +28,7 @@ MANIFEST
 *.out
 run/
 data/
+weights/
 saved_bilinear/
 # PyInstaller
 #  Usually these files are written by a python script from a template
