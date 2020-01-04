@@ -8,4 +8,4 @@
 
 source activate capstone
 cd ../
-python make_prediction.py
+python make_prediction.py -lm /scratch/bz1030/auto_drive/run/model_HG2_stack_2_features_256_BCE_2020-01-04_01-53-02/model_6.pth

@@ -131,13 +131,14 @@ def get_mask_and_regr(img, labels, flip=False):
     regr = np.zeros([IMG_HEIGHT // MODEL_SCALE, IMG_WIDTH // MODEL_SCALE, 7], dtype='float32')
     coords = str2coords(labels)
     xs, ys = get_img_coords(labels)
+    count = 0
+    heatmap = np.zeros((IMG_HEIGHT // MODEL_SCALE, IMG_WIDTH // MODEL_SCALE))
     for x, y, regr_dict in zip(xs, ys, coords):
         x, y = y, x
         x = (x - img.shape[0] // 2) * IMG_HEIGHT / (img.shape[0] // 2) / MODEL_SCALE
         x = np.round(x).astype('int')
         y = (y + img.shape[1] // 6) * IMG_WIDTH / (img.shape[1] * 4 / 3) / MODEL_SCALE
         y = np.round(y).astype('int')
-        heatmap = np.zeros((IMG_HEIGHT // MODEL_SCALE, IMG_WIDTH // MODEL_SCALE))
 
         if x >= 0 and x < IMG_HEIGHT // MODEL_SCALE and y >= 0 and y < IMG_WIDTH // MODEL_SCALE:
             mask[x, y] = 1
@@ -147,13 +148,13 @@ def get_mask_and_regr(img, labels, flip=False):
             heatmap = np.maximum(heatmap, heatmap_i)
             regr_dict = _regr_preprocess(regr_dict, flip)
             regr[x, y] = [regr_dict[n] for n in sorted(regr_dict)]
+            count += 1
     if flip:
         mask = np.array(mask[:, ::-1])
         regr = np.array(regr[:, ::-1])
+
+    print('Heatmap call', count)
     return mask, regr, heatmap
-
-
-
 
 
 def get_mesh(batch_size, shape_x, shape_y):
@@ -162,8 +163,6 @@ def get_mesh(batch_size, shape_x, shape_y):
     mg_y = np.tile(mg_y[None, None, :, :], [batch_size, 1, 1, 1]).astype('float32')
     mesh = torch.cat([torch.tensor(mg_x).to(device), torch.tensor(mg_y).to(device)], 1)
     return mesh
-
-
 
 
 DISTANCE_THRESH_CLEAR = 2

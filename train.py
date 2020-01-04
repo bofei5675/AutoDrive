@@ -150,9 +150,9 @@ class MyUNet(nn.Module):
         x2 = self.mp(self.conv1(x1))
         x3 = self.mp(self.conv2(x2))
         x4 = self.mp(self.conv3(x3))
-        x_center = x[:, :, :, IMG_WIDTH // 8: -IMG_WIDTH // 8]
+        x_center = x[:, :, :, IMG_WIDTH // MODEL_SCALE: -IMG_WIDTH // MODEL_SCALE]
         feats = self.base_model.extract_features(x_center)
-        bg = torch.zeros([feats.shape[0], feats.shape[1], feats.shape[2], feats.shape[3] // 8]).to(device)
+        bg = torch.zeros([feats.shape[0], feats.shape[1], feats.shape[2], feats.shape[3] // MODEL_SCALE]).to(device)
         feats = torch.cat([bg, feats, bg], 3)
         # Add positional info
         mesh2 = get_mesh(batch_size, feats.shape[2], feats.shape[3])
@@ -165,16 +165,20 @@ class MyUNet(nn.Module):
 
 # pixel wise focal loss
 def focal_loss(pred, true, mask, alpha, beta):
-    pos_loss = mask * (1 - pred) ** alpha * torch.log(pred + 1e-12)
-    neg_loss = ((1 - true) ** beta) * (pred ** alpha) * torch.log(1 - pred + 1e-12)
-    loss = pos_loss + neg_loss
+    focal_weights = torch.where(torch.eq(mask,  1), torch.pow(1. - pred, alpha), torch.pow(pred,  beta))
+    bce = - (true * torch.log(pred + 1e-12) + (1 - true) * torch.log(1 - pred + 1e-12))
+    loss = focal_weights * bce
+    # loss = pos_loss + neg_loss
     loss = loss.mean(0).sum()
     return loss
+
 
 def mse_loss(pred, true):
     diff = (pred - true) ** 2
     diff = diff.mean(0).sum()
     return diff
+
+
 def criterion(prediction, mask, regr, heatmap, size_average=True, loss_type='BCE', alpha=2, beta=4):
     '''
     Implement BCE and pixel-wise focal loss
@@ -216,7 +220,6 @@ import time
 
 def train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_scheduler, history=None, args=None):
     model.train()
-    total_loss = 0
     total_batches = len(train_loader)
     total_stacks = args.num_stacks
     stack_losses = np.zeros(total_stacks)
@@ -230,21 +233,26 @@ def train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_
         if type(output) is list:
             loss = 0
             for idx, stack_output in enumerate(output):
-                loss += criterion(stack_output, mask_batch, regr_batch, heatmap_batch,
+                loss_turn = criterion(stack_output, mask_batch, regr_batch, heatmap_batch,
                                   size_average=True, loss_type=args.loss_type, alpha=args.alpha, beta=args.beta)
-                stack_losses[idx] += loss.item()
-            total_loss += loss.item()
+                loss += loss_turn
+                stack_losses[idx] += loss_turn.item()
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-        # exp_lr_scheduler.step()
-        if batch_idx % 20 == 0 or batch_idx == total_batches - 1:
+        exp_lr_scheduler.step()
+        if batch_idx % 50 == 0 or batch_idx == total_batches - 1:
+            total_loss = np.mean(stack_losses)
             with open(save_dir + 'log.txt', 'a+') as f:
                 line = '{} | {} | Total Loss: {:.4f}, Stack Loss:{}\n'\
                     .format(batch_idx + 1, total_batches, total_loss / (batch_idx + 1), stack_losses / (batch_idx + 1))
                 f.write(line)
+    total_loss = np.mean(stack_losses)
+    final_loss = stack_losses[-1]
     if history is not None:
-        history.loc[epoch, 'train_loss'] = total_loss / len(train_loader)
+        history.loc[epoch, 'train_total_loss'] = total_loss / len(train_loader)
+        history.loc[epoch, 'train_final_loss'] = final_loss / len(train_loader)
+
     line = 'Train Epoch: {} \tLR: {:.6f}\tLoss: {:.6f}'.format(
         epoch,
         optimizer.state_dict()['param_groups'][0]['lr'],
@@ -274,16 +282,22 @@ def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, histor
 
             if type(output) is list:
                 for idx, stack_output in enumerate(output):
-                    loss = criterion(stack_output, mask_batch, regr_batch, heatmap_batch,
+                    loss_turn = criterion(stack_output, mask_batch, regr_batch, heatmap_batch,
                                      size_average=True, loss_type=args.loss_type, alpha=args.alpha, beta=args.beta)
-                    stack_loss[idx] += loss.item()
+                    stack_loss[idx] += loss_turn.item()
     total_loss = np.mean(stack_loss)
-    total_loss /= len(dev_loader.dataset)
-    stack_loss /= len(dev_loader.dataset)
+    final_loss = stack_loss[-1]
+    total_loss /= len(dev_loader)
+    stack_loss /= len(dev_loader)
+    final_loss /= len(dev_loader)
     if total_loss < best_loss:
         best_loss = total_loss
         save_model(model, save_dir, epoch)
     if history is not None:
-        history.loc[epoch, 'dev_loss'] = total_loss
-    print('Dev loss: {:.4f}; Stack average loss: {}'.format(total_loss, stack_loss))
-    return best_loss, loss.item()
+        history.loc[epoch, 'dev_total_loss'] = total_loss
+        history.loc[epoch, 'dev_final_loss'] = final_loss
+        for idx, each_stack_loss in enumerate(stack_loss.tolist()):
+            history.loc[epoch, 'dev_stack_{}_loss'.format(idx)] = each_stack_loss
+
+    print('Val total loss: {:.4f}; Final stack loss: {:.4f}; Stack average loss: {}'.format(total_loss, final_loss, stack_loss))
+    return best_loss, total_loss

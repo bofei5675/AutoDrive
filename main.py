@@ -40,7 +40,7 @@ def parse_args():
                       help='Loss function for supervising detection')
     args.add_argument('-a', '--alpha', type=int, dest='alpha', default=2)
     args.add_argument('-b', '--beta', type=int, dest='beta', default=4)
-
+    args.add_argument('-db', '--debug', type=str2bool, dest='debug', default='no')
     return args.parse_args()
 
 
@@ -56,7 +56,8 @@ def main():
         os.mkdir(save_dir)
     with open(save_dir + 'config.txt', 'w') as f:
         f.write(str(args))
-    # train = train.iloc[:50, :]
+    if args.debug:
+        train = train.iloc[:50, :]
     df_train, df_dev = train_test_split(train, test_size=0.05, random_state=42)
     # Augmentation
     transform = Compose([
@@ -101,7 +102,7 @@ def main():
     print('Number of model parameters: {}'.format(
         sum([p.data.nelement() for p in model.parameters()])))
     if args.loss_type == 'FL':
-        lr = 1e-4
+        lr = 1e-3
     else:
         lr = 1e-3
     optimizer = optim.Adam(model.parameters(), lr=lr)

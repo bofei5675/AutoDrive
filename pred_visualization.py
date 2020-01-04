@@ -3,17 +3,20 @@ from tqdm import tqdm#_notebook as tqdm
 import os
 import torch
 from torch.utils.data import Dataset, DataLoader
-from utils import coords2str, CarDataset, MyUNet, double_conv, up, extract_coords
+from utils import coords2str, extract_coords
+from train import CarDataset
 import matplotlib.pyplot as plt
 import os
 import numpy as np
 print('Loading ...')
 PATH = './data/'
 test = pd.read_csv(PATH + 'sample_submission.csv')
+train = pd.read_csv(PATH + 'train.csv')  # .sample(n=20).reset_index()
+train_images_dir = PATH + 'train_images/{}.jpg'
 test_images_dir = PATH + 'test_images/{}.jpg'
 df_test = test
-test_dataset = CarDataset(df_test, test_images_dir, training=False)
-load_model = '/scratch/bz1030/auto_drive/run/model_HG_2019-12-31_17-51-47/model_13.pth'
+test_dataset = CarDataset(train, train_images_dir, training=False)
+load_model = '/scratch/bz1030/auto_drive/run/model_HG2_stack_2_features_256_FL_2020-01-04_01-54-59/model_6.pth'
 save_dir = load_model.split('/')[:-1]
 save_dir = '/'.join(save_dir) + '/figs/'
 if not os.path.exists(save_dir):
@@ -30,8 +33,9 @@ else:
 model.eval()
 print('Start Evaluation ...')
 fig_id = 0
-for img, mask, regr in tqdm(test_dataset):
-    fig, axes = plt.subplots(4, 1, figsize=(16, 16))
+for img, mask, regr, heatmap in tqdm(test_dataset):
+    print(np.where(mask > 0))
+    fig, axes = plt.subplots(5, 1, figsize=(16, 16))
     axes[0].set_title('Input image')
     axes[0].imshow(np.rollaxis(img, 0, 3))
 
@@ -49,6 +53,9 @@ for img, mask, regr in tqdm(test_dataset):
 
     axes[3].set_title('Model predictions thresholded')
     axes[3].imshow(logits > 0)
+
+    axes[4].set_title('Ground Truth Gaussian Kernel')
+    axes[4].imshow(heatmap)
     plt.tight_layout()
     plt.savefig(save_dir + '{}.png'.format(fig_id))
     fig_id += 1
