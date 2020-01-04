@@ -223,6 +223,7 @@ def train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_
     total_batches = len(train_loader)
     total_stacks = args.num_stacks
     stack_losses = np.zeros(total_stacks)
+    EVAL_INTERVAL = 50
     for batch_idx, (img_batch, mask_batch, regr_batch, heatmap_batch) in enumerate(tqdm(train_loader)):
         # print('Train loop:', img_batch.shape)
         img_batch = img_batch.to(device)
@@ -241,12 +242,14 @@ def train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_
             loss.backward()
             optimizer.step()
         exp_lr_scheduler.step()
-        if batch_idx % 50 == 0 or batch_idx == total_batches - 1:
+        if batch_idx % EVAL_INTERVAL == 0 or batch_idx == total_batches - 1:
             total_loss = np.mean(stack_losses)
             with open(save_dir + 'log.txt', 'a+') as f:
                 line = '{} | {} | Total Loss: {:.4f}, Stack Loss:{}\n'\
-                    .format(batch_idx + 1, total_batches, total_loss / (batch_idx + 1), stack_losses / (batch_idx + 1))
+                    .format(batch_idx + 1, total_batches, total_loss / EVAL_INTERVAL, stack_losses / EVAL_INTERVAL)
+                stack_losses = np.zeros(total_stacks)
                 f.write(line)
+
     total_loss = np.mean(stack_losses)
     final_loss = stack_losses[-1]
     if history is not None:
@@ -256,7 +259,7 @@ def train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_
     line = 'Train Epoch: {} \tLR: {:.6f}\tLoss: {:.6f}'.format(
         epoch,
         optimizer.state_dict()['param_groups'][0]['lr'],
-        loss.data)
+        final_loss)
     print(line)
     return total_loss / total_batches
 
