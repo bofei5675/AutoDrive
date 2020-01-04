@@ -245,8 +245,9 @@ def train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_
         if batch_idx % EVAL_INTERVAL == 0 or batch_idx == total_batches - 1:
             total_loss = np.mean(stack_losses)
             with open(save_dir + 'log.txt', 'a+') as f:
+                num_batch = EVAL_INTERVAL if batch_idx != total_batches - 1 else total_batches % EVAL_INTERVAL
                 line = '{} | {} | Total Loss: {:.4f}, Stack Loss:{}\n'\
-                    .format(batch_idx + 1, total_batches, total_loss / EVAL_INTERVAL, stack_losses / EVAL_INTERVAL)
+                    .format(batch_idx + 1, total_batches, total_loss / num_batch, stack_losses / num_batch)
                 stack_losses = np.zeros(total_stacks)
                 f.write(line)
 
