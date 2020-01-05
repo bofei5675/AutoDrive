@@ -125,7 +125,7 @@ def get_img_coords(s):
     return img_xs, img_ys
 
 
-def get_mask_and_regr(img, labels, flip=False):
+def get_mask_and_regr(img, labels, sigma=1, flip=False):
     mask = np.zeros([IMG_HEIGHT // MODEL_SCALE, IMG_WIDTH // MODEL_SCALE], dtype='float32')
     regr_names = ['x', 'y', 'z', 'yaw', 'pitch', 'roll']
     regr = np.zeros([IMG_HEIGHT // MODEL_SCALE, IMG_WIDTH // MODEL_SCALE, 7], dtype='float32')
@@ -142,7 +142,7 @@ def get_mask_and_regr(img, labels, flip=False):
 
         if x >= 0 and x < IMG_HEIGHT // MODEL_SCALE and y >= 0 and y < IMG_WIDTH // MODEL_SCALE:
             mask[x, y] = 1
-            mask_try, heatmap_i = gaussian_kernel(IMG_HEIGHT // MODEL_SCALE, IMG_WIDTH // MODEL_SCALE, x, y, SIGMA)
+            mask_try, heatmap_i = gaussian_kernel(IMG_HEIGHT // MODEL_SCALE, IMG_WIDTH // MODEL_SCALE, x, y, sigma)
             assert mask_try[x, y] == 1
             assert np.abs(heatmap_i[x, y] - 1) < 1e-6
             heatmap = np.maximum(heatmap, heatmap_i)
@@ -153,7 +153,6 @@ def get_mask_and_regr(img, labels, flip=False):
         mask = np.array(mask[:, ::-1])
         regr = np.array(regr[:, ::-1])
 
-    print('Heatmap call', count)
     return mask, regr, heatmap
 
 
@@ -168,7 +167,6 @@ def get_mesh(batch_size, shape_x, shape_y):
 DISTANCE_THRESH_CLEAR = 2
 img = imread(PATH + 'train_images/ID_8a6e65317' + '.jpg')
 IMG_SHAPE = img.shape
-SIGMA = 5
 
 def convert_3d_to_2d(x, y, z, fx=2304.5479, fy=2305.8757, cx=1686.2379, cy=1354.9849):
     # stolen from https://www.kaggle.com/theshockwaverider/eda-visualization-baseline
@@ -263,3 +261,48 @@ def gaussian_kernel(x_total, y_total, x_s, y_s, sigma):
     # gaussian kernel computation
     dist = np.exp(- dist / (2*(sigma ** 2)))
     return mask, dist
+
+
+'''
+functions from kernel: RB's CenterNet Baseline Pytorch without Dropout
+'''
+
+
+def add_number_of_cars(df):
+    """df - train or test"""
+    df['numcars'] = [int((x.count(' ')+1)/7) for x in df['PredictionString']]
+    return df
+
+
+def remove_out_image_cars(df):
+    print(df.head())
+    def isnot_out(x, y):
+        # are x,y coordinates within boundaries of the image
+        return (x >= 0) & (x <= IMG_SHAPE[1]) & (y >= 0) & (y <= IMG_SHAPE[0])
+
+    df = add_number_of_cars(df)
+
+    new_str_coords = []
+    counter_all_ls = []
+    for idx, str_coords in enumerate(df['PredictionString']):
+        coords = str2coords(str_coords, names=['id', 'yaw', 'pitch', 'roll', 'x', 'y', 'z'])
+        xs, ys = get_img_coords(str_coords)
+        counter = 0
+        coords_new = []
+
+        for (item, x, y) in zip(coords, xs, ys):
+            if isnot_out(x, y):
+                coords_new.append(item)
+                counter += 1
+
+        new_str_coords.append(coords2str(coords_new, names=['id', 'yaw', 'pitch', 'roll', 'x', 'y', 'z']))
+        counter_all_ls.append(counter)
+
+    df['new_pred_string'] = new_str_coords
+    df['new_numcars'] = counter_all_ls
+    print("num of cars outside image bounds:", df['numcars'].sum() - df['new_numcars'].sum(),
+          "out of all", df['numcars'].sum(), " cars in train")
+    df = df[['ImageId', 'new_pred_string']]
+    df.rename(columns={'new_pred_string': 'PredictionString'}, inplace=True)
+    print(df.head())
+    return df

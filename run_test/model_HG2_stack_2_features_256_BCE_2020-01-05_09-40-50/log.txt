@@ -1,0 +1,2 @@
+1 | 2022 | Total Loss: 629.048, Stack Loss:606.978; Classification loss: 606.932; Regr loss: 0.046
+51 | 2022 | Total Loss: 21702.369, Stack Loss:19272.463; Classification loss: 19270.760; Regr loss: 1.702

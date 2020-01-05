@@ -21,7 +21,7 @@ def main():
     test = pd.read_csv(PATH + 'sample_submission.csv')
     test_images_dir = PATH + 'test_images/{}.jpg'
     df_test = test
-    test_dataset = CarDataset(df_test, test_images_dir, training=False)
+    test_dataset = CarDataset(df_test, test_images_dir, sigma=1, training=False)
     load_model = args.load_model
     predictions = []
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -29,7 +29,6 @@ def main():
         model = torch.load(load_model)
     else:
         model = torch.load(load_model, map_location='cpu')
-
 
     test_loader = DataLoader(dataset=test_dataset, batch_size=4, shuffle=False, num_workers=4)
 

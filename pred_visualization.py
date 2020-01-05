@@ -16,7 +16,7 @@ train_images_dir = PATH + 'train_images/{}.jpg'
 test_images_dir = PATH + 'test_images/{}.jpg'
 df_test = test
 test_dataset = CarDataset(train, train_images_dir, training=False)
-load_model = '/scratch/bz1030/auto_drive/run/model_HG2_stack_2_features_256_FL_2020-01-04_01-54-59/model_6.pth'
+load_model = '/scratch/bz1030/auto_drive/run/model_HG2_stack_2_features_256_MSE_2020-01-04_07-59-51/model_7.pth'
 save_dir = load_model.split('/')[:-1]
 save_dir = '/'.join(save_dir) + '/figs/'
 if not os.path.exists(save_dir):

@@ -12,6 +12,10 @@ from models.model_hg2 import PoseNet
 import os
 import time
 import torch.nn as nn
+from albumentations import (
+    RandomBrightnessContrast, Compose, RandomGamma, HueSaturationValue,
+    RGBShift, MotionBlur, Blur, GaussNoise, ChannelShuffle
+)
 
 
 def str2bool(v):
@@ -30,7 +34,7 @@ def parse_args():
     args.add_argument('-sd', '--save-dir', type=str, dest='save_dir', default='run/')
     args.add_argument('-m', '--model', type=str, dest='model_type', default='HG2',
                       choices=['UNet', 'HG', 'HG2'])
-    args.add_argument('-ns', '--n-stacks', type=int, dest='num_stacks', default=2)
+    args.add_argument('-ns', '--n-stacks', type=int, dest='num_stacks', default=8)
     args.add_argument('-nc', '--n-classes',  type=int, dest='num_classes', default=8)
     args.add_argument('-nf', '--n-features', type=int, dest='num_features', default=256)
     args.add_argument('-bs', '--batch_size', type=int, dest='batch_size', default=2)
@@ -41,16 +45,22 @@ def parse_args():
     args.add_argument('-a', '--alpha', type=int, dest='alpha', default=2)
     args.add_argument('-b', '--beta', type=int, dest='beta', default=4)
     args.add_argument('-db', '--debug', type=str2bool, dest='debug', default='no')
+    args.add_argument('-s', '--sigma', type=int, dest='sigma', default=1)
+    args.add_argument('-pt', '--pre-train', type=str2bool, dest='pre_train', default='yes')
+    args.add_argument('-tp', '--transform-prob', type=float, dest='prob', default=0.2)
+
     return args.parse_args()
 
 
 def main():
-    current_time = time.strftime("%Y-%m-%d_%H-%M-%S", time.gmtime())
     args = parse_args()
-    save_dir = args.save_dir + 'model_{}_stack_{}_features_{}_{}_'.format(args.model_type, args.num_stacks, args.num_features, args.loss_type)\
+    current_time = time.strftime("%Y-%m-%d_%H-%M-%S", time.gmtime())
+    model_name = 'model_{}_stack_{}_features_{}_{}_' if args.prob <= 0 else 'model_aug_{}_stack_{}_features_{}_{}_'
+    save_dir = args.save_dir + model_name.format(args.model_type, args.num_stacks, args.num_features, args.loss_type)\
                + current_time + '/'
     train_images_dir = PATH + 'train_images/{}.jpg'
-    train = pd.read_csv(PATH + 'train.csv')  # .sample(n=20).reset_index()
+    train = pd.read_csv(PATH + 'train_fixed.csv')  # .sample(n=20).reset_index()
+    train = remove_out_image_cars(train)
     test = pd.read_csv(PATH + 'sample_submission.csv')
     if not os.path.exists(save_dir):
         os.mkdir(save_dir)
@@ -60,14 +70,16 @@ def main():
         train = train.iloc[:50, :]
     df_train, df_dev = train_test_split(train, test_size=0.05, random_state=42)
     # Augmentation
-    transform = Compose([
-        ToPILImage(),
-        ToTensor()
-    ])
+    albu_list = [RandomBrightnessContrast(brightness_limit=(-0.3, 0.3), contrast_limit=(-0.3, 0.3), p=0.3),
+                 RandomGamma(p=0.2), HueSaturationValue(p=0.3), RGBShift(p=0.3), MotionBlur(p=0.1), Blur(p=0.1),
+                 GaussNoise(var_limit=(20, 100), p=0.2),
+                 ChannelShuffle(p=0.2)]
+
+    transform = Compose(albu_list, p=args.prob)
 
     # Create dataset objects
-    train_dataset = CarDataset(df_train, train_images_dir, training=True)
-    dev_dataset = CarDataset(df_dev, train_images_dir, training=False)
+    train_dataset = CarDataset(df_train, train_images_dir, sigma=args.sigma, training=True, transform=transform)
+    dev_dataset = CarDataset(df_dev, train_images_dir, sigma=args.sigma, training=False)
     BATCH_SIZE = args.batch_size
 
     # Create data generators - they will produce batches
@@ -87,17 +99,18 @@ def main():
     elif args.model_type == 'HG2':
         model = PoseNet(nstack=args.num_stacks, inp_dim=args.num_features, oup_dim=args.num_classes)
         model = model.cuda()
-        if args.num_stacks <= 2:
+        if args.num_stacks <= 2 and args.pre_train:
             save = torch.load('./weights/checkpoint_2hg.pt')
-        else:
+        elif args.pre_train:
             save = torch.load('./weights/checkpoint_8hg.pt')
-
         save = save['state_dict']
         # print(model)
         #  print(list(save.keys()))
         # print(model.state_dict().keys())
         load_my_state_dict(model, save)
         del save
+        if torch.cuda.device_count() > 1:
+            model = nn.DataParallel(model)
 
     print('Number of model parameters: {}'.format(
         sum([p.data.nelement() for p in model.parameters()])))

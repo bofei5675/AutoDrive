@@ -28,11 +28,12 @@ camera_matrix = np.array([[2304.5479, 0,  1686.2379],
 class CarDataset(Dataset):
     """Car dataset."""
 
-    def __init__(self, dataframe, root_dir, training=True, transform=None):
+    def __init__(self, dataframe, root_dir, sigma=1, training=True, transform=None):
         self.df = dataframe
         self.root_dir = root_dir
         self.transform = transform
         self.training = training
+        self.sigma = sigma
 
     def __len__(self):
         return len(self.df)
@@ -53,9 +54,14 @@ class CarDataset(Dataset):
         # Read image
         img0 = imread(img_name, True)
         img = preprocess_image(img0, flip=flip)
+        # augmentation
+        if self.transform:
+            img = self.transform(image=img)['image']
         img = np.rollaxis(img, 2, 0)
+
+
         # Get mask and regression maps
-        mask, regr, heatmap = get_mask_and_regr(img0, labels, flip=False)
+        mask, regr, heatmap = get_mask_and_regr(img0, labels, sigma=self.sigma, flip=False)
         regr = np.rollaxis(regr, 2, 0)
 
         return [img, mask, regr, heatmap]
@@ -179,7 +185,8 @@ def mse_loss(pred, true):
     return diff
 
 
-def criterion(prediction, mask, regr, heatmap, size_average=True, loss_type='BCE', alpha=2, beta=4):
+def criterion(prediction, mask, regr, heatmap,
+              size_average=True, loss_type='BCE', alpha=2, beta=4):
     '''
     Implement BCE and pixel-wise focal loss
     alpha/beta are from center net paper
@@ -188,7 +195,7 @@ def criterion(prediction, mask, regr, heatmap, size_average=True, loss_type='BCE
     :param regr:
     :param heatmap:
     :param size_average:
-    :param is_focal_loss:
+    :param loss_type:
     :param alpha:
     :param beta:
     :return:
@@ -212,7 +219,7 @@ def criterion(prediction, mask, regr, heatmap, size_average=True, loss_type='BCE
     loss = mask_loss + regr_loss
     if not size_average:
         loss *= prediction.shape[0]
-    return loss
+    return loss, mask_loss, regr_loss
 
 
 import time
@@ -223,6 +230,8 @@ def train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_
     total_batches = len(train_loader)
     total_stacks = args.num_stacks
     stack_losses = np.zeros(total_stacks)
+    clf_losses = 0
+    regr_losses = 0
     EVAL_INTERVAL = 50
     for batch_idx, (img_batch, mask_batch, regr_batch, heatmap_batch) in enumerate(tqdm(train_loader)):
         # print('Train loop:', img_batch.shape)
@@ -234,10 +243,12 @@ def train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_
         if type(output) is list:
             loss = 0
             for idx, stack_output in enumerate(output):
-                loss_turn = criterion(stack_output, mask_batch, regr_batch, heatmap_batch,
+                loss_turn, clf_loss, regr_loss = criterion(stack_output, mask_batch, regr_batch, heatmap_batch,
                                   size_average=True, loss_type=args.loss_type, alpha=args.alpha, beta=args.beta)
                 loss += loss_turn
                 stack_losses[idx] += loss_turn.item()
+            clf_losses += clf_loss.item()
+            regr_losses += regr_loss.item()
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -246,9 +257,14 @@ def train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_
             total_loss = np.mean(stack_losses)
             with open(save_dir + 'log.txt', 'a+') as f:
                 num_batch = EVAL_INTERVAL if batch_idx != total_batches - 1 else total_batches % EVAL_INTERVAL
-                line = '{} | {} | Total Loss: {:.4f}, Stack Loss:{}\n'\
-                    .format(batch_idx + 1, total_batches, total_loss / num_batch, stack_losses / num_batch)
-                stack_losses = np.zeros(total_stacks)
+                line = '{} | {} | Total Loss: {:.3f}, Stack Loss:{:.3f}; Classification loss: {:.3f}; Regr loss: {:.3f}\n'\
+                    .format(batch_idx + 1, total_batches, total_loss / num_batch,
+                            stack_losses[-1] / num_batch, clf_losses / num_batch,
+                            regr_losses / num_batch)
+                if batch_idx != total_batches - 1: # reset
+                    stack_losses = np.zeros(total_stacks)
+                    clf_losses = 0
+                    regr_losses = 0
                 f.write(line)
 
     total_loss = np.mean(stack_losses)
@@ -277,6 +293,8 @@ def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, histor
     model.eval()
     with torch.no_grad():
         stack_loss = np.zeros(args.num_stacks)
+        clf_losses = 0
+        regr_losses  = 0
         for img_batch, mask_batch, regr_batch, heatmap_batch in dev_loader:
             img_batch = img_batch.to(device)
             mask_batch = mask_batch.to(device)
@@ -286,14 +304,18 @@ def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, histor
 
             if type(output) is list:
                 for idx, stack_output in enumerate(output):
-                    loss_turn = criterion(stack_output, mask_batch, regr_batch, heatmap_batch,
+                    loss_turn, clf_loss, regr_loss = criterion(stack_output, mask_batch, regr_batch, heatmap_batch,
                                      size_average=True, loss_type=args.loss_type, alpha=args.alpha, beta=args.beta)
                     stack_loss[idx] += loss_turn.item()
+                clf_losses += clf_loss.item()
+                regr_loss += regr_loss.item()
     total_loss = np.mean(stack_loss)
     final_loss = stack_loss[-1]
     total_loss /= len(dev_loader)
     stack_loss /= len(dev_loader)
     final_loss /= len(dev_loader)
+    clf_losses /= len(dev_loader)
+    regr_losses /= len(dev_loader)
     if total_loss < best_loss:
         best_loss = total_loss
         save_model(model, save_dir, epoch)
@@ -303,5 +325,6 @@ def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, histor
         for idx, each_stack_loss in enumerate(stack_loss.tolist()):
             history.loc[epoch, 'dev_stack_{}_loss'.format(idx)] = each_stack_loss
 
-    print('Val total loss: {:.4f}; Final stack loss: {:.4f}; Stack average loss: {}'.format(total_loss, final_loss, stack_loss))
+    print('Val total loss: {:.4f}; Final stack loss: {:.4f}; Clf loss: {:.3f}; Regr loss: {:.3f}'\
+          .format(total_loss, final_loss, clf_losses, regr_losses))
     return best_loss, total_loss
