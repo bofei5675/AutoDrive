@@ -3,6 +3,7 @@
 Training data
 1. average cars number: 11.418839558374442, sum of cars: 48610
 2. Pre-trained weights are from [this repo](https://github.com/princeton-vl/pytorch_stacked_hourglass)
+3. Refer to this [kaggle discussion](https://www.kaggle.com/c/pku-autonomous-driving/discussion/117621) to remove broken image to obtain `train_fixed.csv`
 ## Improvements
 - [x] U-Nets, score: 0.028
 - [x] Stacked Hourglassnetwork, score: 0.018-0.045 (based on number of stacks)
