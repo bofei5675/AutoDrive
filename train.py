@@ -186,7 +186,7 @@ def mse_loss(pred, true):
 
 
 def criterion(prediction, mask, regr, heatmap,
-              size_average=True, loss_type='BCE', alpha=2, beta=4):
+              size_average=True, loss_type='BCE', alpha=2, beta=4, gamma=1):
     '''
     Implement BCE and pixel-wise focal loss
     alpha/beta are from center net paper
@@ -216,10 +216,10 @@ def criterion(prediction, mask, regr, heatmap,
     regr_loss = regr_loss.mean(0)
 
     # Sum
-    loss = mask_loss + regr_loss
+    loss = mask_loss + gamma * regr_loss
     if not size_average:
         loss *= prediction.shape[0]
-    return loss, mask_loss, regr_loss
+    return loss, mask_loss, gamma * regr_loss
 
 
 import time
@@ -244,7 +244,9 @@ def train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_
             loss = 0
             for idx, stack_output in enumerate(output):
                 loss_turn, clf_loss, regr_loss = criterion(stack_output, mask_batch, regr_batch, heatmap_batch,
-                                  size_average=True, loss_type=args.loss_type, alpha=args.alpha, beta=args.beta)
+                                                           size_average=True, loss_type=args.loss_type,
+                                                           alpha=args.alpha, beta=args.beta,
+                                                           gamma=args.gamma)
                 loss += loss_turn
                 stack_losses[idx] += loss_turn.item()
             clf_losses += clf_loss.item()
@@ -278,7 +280,7 @@ def train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_
         optimizer.state_dict()['param_groups'][0]['lr'],
         final_loss)
     print(line)
-    return total_loss / total_batches
+    return total_loss / num_batch
 
 
 def save_model(model, dir, epoch):
@@ -305,7 +307,8 @@ def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, histor
             if type(output) is list:
                 for idx, stack_output in enumerate(output):
                     loss_turn, clf_loss, regr_loss = criterion(stack_output, mask_batch, regr_batch, heatmap_batch,
-                                     size_average=True, loss_type=args.loss_type, alpha=args.alpha, beta=args.beta)
+                                                               size_average=True, loss_type=args.loss_type,
+                                                               alpha=args.alpha, beta=args.beta, gamma=args.gamma)
                     stack_loss[idx] += loss_turn.item()
                 clf_losses += clf_loss.item()
                 regr_loss += regr_loss.item()
@@ -327,4 +330,4 @@ def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, histor
 
     print('Val total loss: {:.4f}; Final stack loss: {:.4f}; Clf loss: {:.3f}; Regr loss: {:.3f}'\
           .format(total_loss, final_loss, clf_losses, regr_losses))
-    return best_loss, total_loss
+    return best_loss, total_loss, clf_losses, regr_losses

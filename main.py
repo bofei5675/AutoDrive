@@ -48,7 +48,7 @@ def parse_args():
     args.add_argument('-s', '--sigma', type=int, dest='sigma', default=1)
     args.add_argument('-pt', '--pre-train', type=str2bool, dest='pre_train', default='yes')
     args.add_argument('-tp', '--transform-prob', type=float, dest='prob', default=0.2)
-
+    args.add_argument('-g', '--gamma', type=float, dest='gamma', default=10, help='Weights for regression loss')
     return args.parse_args()
 
 
@@ -127,10 +127,12 @@ def main():
         gc.collect()
         train_loss = train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_scheduler, history,
                                  args)
-        best_loss, eval_loss = evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, history, args)
+        best_loss, eval_loss, clf_losses, regr_losses = evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, history, args)
         with open(save_dir + 'log.txt', 'a+') as f:
-            line = 'Epoch: {}; Train loss: {:.4f}; Eval Loss: {:.4f}; Best eval loss: {:.4f}\n'.format(epoch,
+            line = 'Epoch: {}; Train loss: {:.4f}; Eval Loss: {:.4f};Clf loss: {:.4f}; Regr loss: {:.4f}; Best eval loss: {:.4f}\n'.format(epoch,
                                                                                                        train_loss,
+                                                                                                       clf_losses,
+                                                                                                       regr_losses,
                                                                                                        eval_loss,
                                                                                                        best_loss)
             f.write(line)
