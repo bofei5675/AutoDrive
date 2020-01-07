@@ -8,6 +8,7 @@ from train import CarDataset
 import argparse
 import time
 
+
 def parse_args():
     args = argparse.ArgumentParser()
     args.add_argument('-lm', '--load-model', type=str, dest='load_model', default=None)
@@ -56,10 +57,8 @@ def main():
     test = add_number_of_cars(test)
     avg_cars, sum_cars = test.numcars.mean(), test.numcars.sum()
     with open(save_dir +'/stats_{}.txt'.format(args.threshold), 'a+') as f:
-        f.write('Average:'+ str(avg_cars) + '\n')
-        f.write('Total:'+ str(avg_cars) + '\n')
-
-
+        f.write('Average:' + str(avg_cars) + '\n')
+        f.write('Total:' + str(avg_cars) + '\n')
 
 
 if __name__ == '__main__':

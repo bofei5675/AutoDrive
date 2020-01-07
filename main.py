@@ -1,3 +1,4 @@
+
 from utils import *
 from train import CarDataset, train_model, evaluate_model
 from torch.optim import lr_scheduler
@@ -48,7 +49,10 @@ def parse_args():
     args.add_argument('-s', '--sigma', type=int, dest='sigma', default=1)
     args.add_argument('-pt', '--pre-train', type=str2bool, dest='pre_train', default='yes')
     args.add_argument('-tp', '--transform-prob', type=float, dest='prob', default=0.2)
-    args.add_argument('-g', '--gamma', type=float, dest='gamma', default=10, help='Weights for regression loss')
+    args.add_argument('-g', '--gamma', type=float, dest='gamma', default=1, help='Weights for regression loss')
+    args.add_argument('-vs', '--val-size', type=float, dest='val_size',
+                      default=0.05, help='Validation data set size ratio')
+
     return args.parse_args()
 
 
@@ -68,7 +72,7 @@ def main():
         f.write(str(args))
     if args.debug:
         train = train.iloc[:50, :]
-    df_train, df_dev = train_test_split(train, test_size=0.05, random_state=42)
+    df_train, df_dev = train_test_split(train, test_size=args.val_size, random_state=42)
     # Augmentation
     albu_list = [RandomBrightnessContrast(brightness_limit=(-0.3, 0.3), contrast_limit=(-0.3, 0.3), p=0.3),
                  RandomGamma(p=0.2), HueSaturationValue(p=0.3), RGBShift(p=0.3), MotionBlur(p=0.1), Blur(p=0.1),
@@ -125,16 +129,18 @@ def main():
     for epoch in range(n_epochs):
         torch.cuda.empty_cache()
         gc.collect()
-        train_loss = train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_scheduler, history,
+        train_loss, train_final_loss = train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_scheduler, history,
                                  args)
         best_loss, eval_loss, clf_losses, regr_losses = evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, history, args)
         with open(save_dir + 'log.txt', 'a+') as f:
-            line = 'Epoch: {}; Train loss: {:.4f}; Eval Loss: {:.4f};Clf loss: {:.4f}; Regr loss: {:.4f}; Best eval loss: {:.4f}\n'.format(epoch,
-                                                                                                       train_loss,
-                                                                                                       clf_losses,
-                                                                                                       regr_losses,
-                                                                                                       eval_loss,
-                                                                                                       best_loss)
+            line = 'Epoch: {}; Train total loss: {:.3f}; Train final loss: {:.3f}; Eval final loss: {:.3f}; Clf loss: {:.3f}; Regr loss: {:.3f}; Best eval loss: {:.3f}\n'\
+                .format(epoch,
+                train_loss,
+                train_final_loss,
+                eval_loss,
+                clf_losses,
+                regr_losses,
+                best_loss)
             f.write(line)
         history.to_csv(save_dir + 'history.csv', index=False)
 

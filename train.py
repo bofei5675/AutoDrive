@@ -214,7 +214,6 @@ def criterion(prediction, mask, regr, heatmap,
     pred_regr = prediction[:, 1:]
     regr_loss = (torch.abs(pred_regr - regr).sum(1) * mask).sum(1).sum(1) / mask.sum(1).sum(1)
     regr_loss = regr_loss.mean(0)
-
     # Sum
     loss = mask_loss + gamma * regr_loss
     if not size_average:
@@ -230,6 +229,7 @@ def train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_
     total_batches = len(train_loader)
     total_stacks = args.num_stacks
     stack_losses = np.zeros(total_stacks)
+    epoch_loss = 0
     clf_losses = 0
     regr_losses = 0
     EVAL_INTERVAL = 50
@@ -249,6 +249,10 @@ def train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_
                                                            gamma=args.gamma)
                 loss += loss_turn
                 stack_losses[idx] += loss_turn.item()
+                if idx == len(output) - 1:
+                    epoch_loss += loss_turn.item()
+            # add final stack  value
+
             clf_losses += clf_loss.item()
             regr_losses += regr_loss.item()
             optimizer.zero_grad()
@@ -259,28 +263,24 @@ def train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_
             total_loss = np.mean(stack_losses)
             with open(save_dir + 'log.txt', 'a+') as f:
                 num_batch = EVAL_INTERVAL if batch_idx != total_batches - 1 else total_batches % EVAL_INTERVAL
-                line = '{} | {} | Total Loss: {:.3f}, Stack Loss:{:.3f}; Classification loss: {:.3f}; Regr loss: {:.3f}\n'\
-                    .format(batch_idx + 1, total_batches, total_loss / num_batch,
-                            stack_losses[-1] / num_batch, clf_losses / num_batch,
-                            regr_losses / num_batch)
-                if batch_idx != total_batches - 1: # reset
-                    stack_losses = np.zeros(total_stacks)
-                    clf_losses = 0
-                    regr_losses = 0
+                line = '{} | {} | Total Loss: {:.3f}, Stack Loss:{:.3f}; Clf loss: {:.3f}; Regr loss: {:.3f}\n'\
+                    .format(batch_idx + 1, total_batches, total_loss / (batch_idx + 1),
+                            stack_losses[-1] / (batch_idx + 1), clf_losses / (batch_idx + 1),
+                            regr_losses / (batch_idx + 1))
                 f.write(line)
 
     total_loss = np.mean(stack_losses)
     final_loss = stack_losses[-1]
     if history is not None:
-        history.loc[epoch, 'train_total_loss'] = total_loss / len(train_loader)
-        history.loc[epoch, 'train_final_loss'] = final_loss / len(train_loader)
+        history.loc[epoch, 'train_total_loss'] = total_loss / total_batches
+        history.loc[epoch, 'train_final_loss'] = final_loss / total_batches
 
     line = 'Train Epoch: {} \tLR: {:.6f}\tLoss: {:.6f}'.format(
         epoch,
         optimizer.state_dict()['param_groups'][0]['lr'],
         final_loss)
     print(line)
-    return total_loss / num_batch
+    return epoch_loss / len(train_loader), final_loss / len(train_loader)
 
 
 def save_model(model, dir, epoch):
@@ -296,7 +296,7 @@ def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, histor
     with torch.no_grad():
         stack_loss = np.zeros(args.num_stacks)
         clf_losses = 0
-        regr_losses  = 0
+        regr_losses = 0
         for img_batch, mask_batch, regr_batch, heatmap_batch in dev_loader:
             img_batch = img_batch.to(device)
             mask_batch = mask_batch.to(device)
@@ -311,7 +311,7 @@ def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, histor
                                                                alpha=args.alpha, beta=args.beta, gamma=args.gamma)
                     stack_loss[idx] += loss_turn.item()
                 clf_losses += clf_loss.item()
-                regr_loss += regr_loss.item()
+                regr_losses += regr_loss.item()
     total_loss = np.mean(stack_loss)
     final_loss = stack_loss[-1]
     total_loss /= len(dev_loader)
@@ -319,15 +319,13 @@ def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, histor
     final_loss /= len(dev_loader)
     clf_losses /= len(dev_loader)
     regr_losses /= len(dev_loader)
-    if total_loss < best_loss:
-        best_loss = total_loss
+    if final_loss < best_loss:
+        best_loss = final_loss
         save_model(model, save_dir, epoch)
     if history is not None:
         history.loc[epoch, 'dev_total_loss'] = total_loss
         history.loc[epoch, 'dev_final_loss'] = final_loss
-        for idx, each_stack_loss in enumerate(stack_loss.tolist()):
-            history.loc[epoch, 'dev_stack_{}_loss'.format(idx)] = each_stack_loss
 
-    print('Val total loss: {:.4f}; Final stack loss: {:.4f}; Clf loss: {:.3f}; Regr loss: {:.3f}'\
+    print('Val total loss: {:.3f}; Final stack loss: {:.3f}; Clf loss: {:.3f}; Regr loss: {:.3f}'\
           .format(total_loss, final_loss, clf_losses, regr_losses))
-    return best_loss, total_loss, clf_losses, regr_losses
+    return best_loss, final_loss, clf_losses, regr_losses

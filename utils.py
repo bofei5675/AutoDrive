@@ -203,8 +203,9 @@ def clear_duplicates(coords):
 
 def extract_coords(prediction, threshold=0):
     logits = prediction[0]
+    logits -= threshold # adjust logits by a threshold
     regr_output = prediction[1:]
-    points = np.argwhere(logits > threshold)
+    points = np.argwhere(logits > 0)
     col_names = sorted(['x', 'y', 'z', 'yaw', 'pitch_sin', 'pitch_cos', 'roll'])
     coords = []
     for r, c in points:
