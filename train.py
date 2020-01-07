@@ -1,6 +1,6 @@
-import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
+import pandas as pd  # data processing, CSV file I/O (e.g. pd.read_csv)
 import cv2
-from tqdm import tqdm#_notebook as tqdm
+from tqdm import tqdm  # _notebook as tqdm
 import matplotlib.pyplot as plt
 import seaborn as sns
 from functools import reduce
@@ -16,11 +16,11 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import models
 from torchvision import transforms, utils
 from efficientnet_pytorch import EfficientNet
-from utils import imread, preprocess_image, get_mask_and_regr,\
+from utils import imread, preprocess_image, get_mask_and_regr, \
     IMG_WIDTH, IMG_HEIGHT, MODEL_SCALE, load_my_state_dict
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-camera_matrix = np.array([[2304.5479, 0,  1686.2379],
+camera_matrix = np.array([[2304.5479, 0, 1686.2379],
                           [0, 2305.8757, 1354.9849],
                           [0, 0, 1]], dtype=np.float32)
 
@@ -59,7 +59,6 @@ class CarDataset(Dataset):
             img = self.transform(image=img)['image']
         img = np.rollaxis(img, 2, 0)
 
-
         # Get mask and regression maps
         mask, regr, heatmap = get_mask_and_regr(img0, labels, sigma=self.sigma, flip=False)
         regr = np.rollaxis(regr, 2, 0)
@@ -87,7 +86,7 @@ class double_conv(nn.Module):
 
 
 class up(nn.Module):
-    def __init__(self, in_ch, mid_ch,out_ch, bilinear=True):
+    def __init__(self, in_ch, mid_ch, out_ch, bilinear=True):
         super(up, self).__init__()
 
         #  would be a nice idea if the upsampling could be learned too,
@@ -113,7 +112,7 @@ class up(nn.Module):
         # for padding issues, see
         # https://github.com/HaiyongJiang/U-Net-Pytorch-Unstructured-Buggy/commit/0e854509c2cea854e247a9c615f175f76fbb2e3a
         # https://github.com/xiaopeng-liao/Pytorch-UNet/commit/8ebac70e633bac59fc22bb5195e513d5832fb3bd
-        #print(x1.shape, x2.shape)
+        # print(x1.shape, x2.shape)
         if x2 is not None:
             x = torch.cat([x2, x1], dim=1)
         else:
@@ -171,7 +170,7 @@ class MyUNet(nn.Module):
 
 # pixel wise focal loss
 def focal_loss(pred, true, mask, alpha, beta):
-    focal_weights = torch.where(torch.eq(mask,  1), torch.pow(1. - pred, alpha), torch.pow(pred,  beta))
+    focal_weights = torch.where(torch.eq(mask, 1), torch.pow(1. - pred, alpha), torch.pow(pred, beta))
     bce = - (true * torch.log(pred + 1e-12) + (1 - true) * torch.log(1 - pred + 1e-12))
     loss = focal_weights * bce
     # loss = pos_loss + neg_loss
@@ -202,11 +201,11 @@ def criterion(prediction, mask, regr, heatmap,
     '''
     # Binary mask loss
     pred_mask = torch.sigmoid(prediction[:, 0])
-    if loss_type=='BCE':
+    if loss_type == 'BCE':
         #    mask_loss = mask * (1 - pred_mask)**2 * torch.log(pred_mask + 1e-12) + (1 - mask) * pred_mask**2 * torch.log(1 - pred_mask + 1e-12)
         mask_loss = mask * torch.log(pred_mask + 1e-12) + (1 - mask) * torch.log(1 - pred_mask + 1e-12)
         mask_loss = -mask_loss.mean(0).sum()
-    elif loss_type == 'FL': # focal loss
+    elif loss_type == 'FL':  # focal loss
         mask_loss = focal_loss(pred_mask, heatmap, mask, alpha, beta)
     elif loss_type == 'MSE':
         mask_loss = mse_loss(pred_mask, heatmap)
@@ -263,7 +262,7 @@ def train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_
             total_loss = np.mean(stack_losses)
             with open(save_dir + 'log.txt', 'a+') as f:
                 num_batch = EVAL_INTERVAL if batch_idx != total_batches - 1 else total_batches % EVAL_INTERVAL
-                line = '{} | {} | Total Loss: {:.3f}, Stack Loss:{:.3f}; Clf loss: {:.3f}; Regr loss: {:.3f}\n'\
+                line = '{} | {} | Total Loss: {:.3f}, Stack Loss:{:.3f}; Clf loss: {:.3f}; Regr loss: {:.3f}\n' \
                     .format(batch_idx + 1, total_batches, total_loss / (batch_idx + 1),
                             stack_losses[-1] / (batch_idx + 1), clf_losses / (batch_idx + 1),
                             regr_losses / (batch_idx + 1))
@@ -290,8 +289,7 @@ def save_model(model, dir, epoch):
     torch.save(model, dir + 'model_{}.pth'.format(epoch))
 
 
-def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, history=None, args = None):
-
+def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, history=None, args=None):
     model.eval()
     with torch.no_grad():
         stack_loss = np.zeros(args.num_stacks)
@@ -326,6 +324,6 @@ def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, histor
         history.loc[epoch, 'dev_total_loss'] = total_loss
         history.loc[epoch, 'dev_final_loss'] = final_loss
 
-    print('Val total loss: {:.3f}; Final stack loss: {:.3f}; Clf loss: {:.3f}; Regr loss: {:.3f}'\
+    print('Val total loss: {:.3f}; Final stack loss: {:.3f}; Clf loss: {:.3f}; Regr loss: {:.3f}' \
           .format(total_loss, final_loss, clf_losses, regr_losses))
     return best_loss, final_loss, clf_losses, regr_losses

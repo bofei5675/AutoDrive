@@ -6,7 +6,7 @@ import torch
 import argparse
 import gc
 from torchvision.transforms import ToPILImage, ToTensor, RandomRotation, RandomHorizontalFlip, \
-    Compose, Resize, Normalize
+    Compose, Resize
 from models.model_hg import HourglassNet
 from models.model_hg2 import PoseNet
 import os
@@ -14,10 +14,11 @@ import time
 import torch.nn as nn
 from albumentations import (
     RandomBrightnessContrast, Compose, RandomGamma, HueSaturationValue,
-    RGBShift, MotionBlur, Blur, GaussNoise, ChannelShuffle
+    RGBShift, MotionBlur, Blur, GaussNoise, ChannelShuffle, Normalize
 )
 
 import warnings
+
 warnings.filterwarnings("ignore")
 
 
@@ -38,7 +39,7 @@ def parse_args():
     args.add_argument('-m', '--model', type=str, dest='model_type', default='HG2',
                       choices=['UNet', 'HG', 'HG2'])
     args.add_argument('-ns', '--n-stacks', type=int, dest='num_stacks', default=2)
-    args.add_argument('-nc', '--n-classes',  type=int, dest='num_classes', default=8)
+    args.add_argument('-nc', '--n-classes', type=int, dest='num_classes', default=8)
     args.add_argument('-nf', '--n-features', type=int, dest='num_features', default=256)
     args.add_argument('-bs', '--batch_size', type=int, dest='batch_size', default=2)
     args.add_argument('-e', '--epoch', type=int, dest='epoch', default=30)
@@ -66,7 +67,7 @@ def main():
     model_name = 'model_{}_stack_{}_features_{}_{}_' if args.prob <= 0 else 'model_aug_{}_stack_{}_features_{}_{}_'
 
     model_name += 'cbam_' if args.use_cbam else ''
-    save_dir = args.save_dir + model_name.format(args.model_type, args.num_stacks, args.num_features, args.loss_type)\
+    save_dir = args.save_dir + model_name.format(args.model_type, args.num_stacks, args.num_features, args.loss_type) \
                + current_time + '/'
     train_images_dir = PATH + 'train_images/{}.jpg'
     train = pd.read_csv(PATH + 'train_fixed.csv')  # .sample(n=20).reset_index()
