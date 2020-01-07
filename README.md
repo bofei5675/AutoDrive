@@ -15,7 +15,7 @@ Training data
 ## Improvements
 - [x] U-Nets, score: 0.028
 - [x] Stacked Hourglassnetwork, score: 0.018-0.045 (based on number of stacks)
-- [ ] threshold for logits is tricky (previously, it's 0 but it's not always work)
-- [ ] Pixel-wised augmentation (implemented)
-- [ ] Remove broken image on training dataset (implemented)
+- [x] threshold for logits is tricky (previously, it's 0 but it's not always work)
+- [x] Pixel-wised augmentation (implemented)
+- [x] Remove broken image on training dataset (implemented) - Increase score to 0.065 for 4-stacks HG
 - [ ] Normalize all image based on overall mean and standard deviation (not implemented yet)
