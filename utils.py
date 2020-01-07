@@ -152,6 +152,7 @@ def get_mask_and_regr(img, labels, sigma=1, flip=False):
     if flip:
         mask = np.array(mask[:, ::-1])
         regr = np.array(regr[:, ::-1])
+        heatmap = np.array((heatmap[:, ::-1]))
 
     return mask, regr, heatmap
 

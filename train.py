@@ -61,10 +61,49 @@ class CarDataset(Dataset):
 
 
         # Get mask and regression maps
-        mask, regr, heatmap = get_mask_and_regr(img0, labels, sigma=self.sigma, flip=False)
+        mask, regr, heatmap = get_mask_and_regr(img0, labels,
+                                                sigma=self.sigma,
+                                                flip=flip)
         regr = np.rollaxis(regr, 2, 0)
 
         return [img, mask, regr, heatmap]
+
+class CarDatasetUnsup(Dataset):
+    """Car dataset."""
+
+    def __init__(self, dataframe, root_dir, sigma=1, training=True, transform=None):
+        self.df = dataframe
+        self.root_dir = root_dir
+        self.transform = transform
+        self.training = training
+        self.sigma = sigma
+
+    def __len__(self):
+        return len(self.df)
+
+    def __getitem__(self, idx):
+
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+
+        # Get image name
+        idx, _ = self.df.values[idx]
+        img_name = self.root_dir.format(idx)
+        if not self.training:
+            return img_name, img_name # dummy return and do nothing for it
+        # Read image
+        img0 = imread(img_name, True)
+
+        img = preprocess_image(img0, flip=False)
+        # augmentation
+        if self.transform:
+            img1 = self.transform(image=img)['image']
+            img2 = self.transform(image=img)['image']
+
+        img1 = np.rollaxis(img1, 2, 0)
+        img2 = np.rollaxis(img2, 2, 0)
+
+        return [img1, img2]
 
 
 class double_conv(nn.Module):
@@ -186,7 +225,8 @@ def mse_loss(pred, true):
 
 
 def criterion(prediction, mask, regr, heatmap,
-              size_average=True, loss_type='BCE', alpha=2, beta=4, gamma=1):
+              size_average=True, loss_type='BCE',
+              alpha=2, beta=4, gamma=1):
     '''
     Implement BCE and pixel-wise focal loss
     alpha/beta are from center net paper
@@ -224,7 +264,7 @@ def criterion(prediction, mask, regr, heatmap,
 import time
 
 
-def train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_scheduler, history=None, args=None):
+def train_model(save_dir, model, epoch, train_loader, test_loader, device, optimizer, exp_lr_scheduler, history=None, args=None):
     model.train()
     total_batches = len(train_loader)
     total_stacks = args.num_stacks
@@ -233,7 +273,11 @@ def train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_
     clf_losses = 0
     regr_losses = 0
     EVAL_INTERVAL = 50
-    for batch_idx, (img_batch, mask_batch, regr_batch, heatmap_batch) in enumerate(tqdm(train_loader)):
+    unsupervise_loss = 0
+    lambda_ = args.unsupervise
+    unsupervise = args.unsupervise != 0
+    bar = tqdm(total=len(train_loader), desc='Processing', ncols=90)
+    for batch_idx, ((img_batch, mask_batch, regr_batch, heatmap_batch), (img1, img2) )in enumerate(zip(train_loader, test_loader)):
         # print('Train loop:', img_batch.shape)
         img_batch = img_batch.to(device)
         mask_batch = mask_batch.to(device)
@@ -247,8 +291,18 @@ def train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_
                                                            size_average=True, loss_type=args.loss_type,
                                                            alpha=args.alpha, beta=args.beta,
                                                            gamma=args.gamma)
-                loss += loss_turn
+                if not unsupervise:
+                    loss += loss_turn
+                else:
+                    img1 = img1.to(device)
+                    img2 = img2.to(device)
+                    pred1 = model(img1)
+                    pred2 = model(img2)
+                    unsup_loss = mse_loss(pred1, pred2)
+                    loss = loss_turn + args.unsupervise * unsup_loss
+                    unsupervise_loss += args.unsupervise * unsup_loss.item()
                 stack_losses[idx] += loss_turn.item()
+
                 if idx == len(output) - 1:
                     epoch_loss += loss_turn.item()
             # add final stack  value
@@ -258,15 +312,15 @@ def train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+        bar.update(1)
         exp_lr_scheduler.step()
         if batch_idx % EVAL_INTERVAL == 0 or batch_idx == total_batches - 1:
             total_loss = np.mean(stack_losses)
             with open(save_dir + 'log.txt', 'a+') as f:
-                num_batch = EVAL_INTERVAL if batch_idx != total_batches - 1 else total_batches % EVAL_INTERVAL
-                line = '{} | {} | Total Loss: {:.3f}, Stack Loss:{:.3f}; Clf loss: {:.3f}; Regr loss: {:.3f}\n'\
+                line = '{} | {} | Total Loss: {:.3f}, Stack Loss:{:.3f}; Clf loss: {:.3f}; Regr loss: {:.3f}; Unsup loss: {:.3f}\n'\
                     .format(batch_idx + 1, total_batches, total_loss / (batch_idx + 1),
                             stack_losses[-1] / (batch_idx + 1), clf_losses / (batch_idx + 1),
-                            regr_losses / (batch_idx + 1))
+                            regr_losses / (batch_idx + 1), unsupervise_loss / (batch_idx + 1))
                 f.write(line)
 
     total_loss = np.mean(stack_losses)
@@ -293,6 +347,7 @@ def save_model(model, dir, epoch):
 def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, history=None, args = None):
 
     model.eval()
+    bar = tqdm(total=len(dev_loader), desc='Processing', ncols=90)
     with torch.no_grad():
         stack_loss = np.zeros(args.num_stacks)
         clf_losses = 0
@@ -312,6 +367,7 @@ def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, histor
                     stack_loss[idx] += loss_turn.item()
                 clf_losses += clf_loss.item()
                 regr_losses += regr_loss.item()
+            bar.update(1)
     total_loss = np.mean(stack_loss)
     final_loss = stack_loss[-1]
     total_loss /= len(dev_loader)

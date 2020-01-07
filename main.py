@@ -1,6 +1,6 @@
 
 from utils import *
-from train import CarDataset, train_model, evaluate_model
+from train import CarDataset, CarDatasetUnsup, train_model, evaluate_model
 from torch.optim import lr_scheduler
 from sklearn.model_selection import train_test_split
 import torch
@@ -54,6 +54,8 @@ def parse_args():
                       default=0.05, help='Validation data set size ratio')
     args.add_argument('-uc', '--use-cbam', type=str2bool, dest='use_cbam',
                       default='no', help='whether to use attention mechansim')
+    args.add_argument('-uns', '--unsupervise-param', type=float, dest='unsupervise', help='If use UDA',
+                      default=0)
 
     return args.parse_args()
 
@@ -63,12 +65,12 @@ def main():
     current_time = time.strftime("%Y-%m-%d_%H-%M-%S", time.gmtime())
     model_name = 'model_{}_stack_{}_features_{}_{}_' if args.prob <= 0 else 'model_aug_{}_stack_{}_features_{}_{}_'
     model_name += 'cbam_' if args.use_cbam else ''
+    model_name += 'unsup_' if args.unsupervise != 0 else ''
     save_dir = args.save_dir + model_name.format(args.model_type, args.num_stacks, args.num_features, args.loss_type)\
                + current_time + '/'
     train_images_dir = PATH + 'train_images/{}.jpg'
     train = pd.read_csv(PATH + 'train_fixed.csv')  # .sample(n=20).reset_index()
     train = remove_out_image_cars(train)
-    test = pd.read_csv(PATH + 'sample_submission.csv')
     if not os.path.exists(save_dir):
         os.mkdir(save_dir)
     with open(save_dir + 'config.txt', 'w') as f:
@@ -130,11 +132,21 @@ def main():
     exp_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=max(n_epochs, 10) * len(train_loader) // 3, gamma=0.1)
     history = pd.DataFrame()
     best_loss = 1e6
+
+    # unsupervise part
+    test_images_dir = PATH + 'test_images/{}.jpg'
+    test = pd.read_csv(PATH + 'sample_submission.csv')
+    test = test.sample(n=train.shape[0] // 2, replace=True)#.reset_index()
+    transform_test = Compose(albu_list, p=1)
+    test_dataset = CarDatasetUnsup(test, test_images_dir, sigma=args.sigma, training= args.unsupervise != 0, transform=transform_test)
+    test_loader = DataLoader(dataset=test_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
+
     for epoch in range(n_epochs):
         torch.cuda.empty_cache()
         gc.collect()
-        train_loss, train_final_loss = train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_scheduler, history,
-                                 args)
+        train_loss, train_final_loss = train_model(save_dir, model, epoch, train_loader, test_loader, device,
+                                                   optimizer, exp_lr_scheduler, history,
+                                                    args)
         best_loss, eval_loss, clf_losses, regr_losses = evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, history, args)
         with open(save_dir + 'log.txt', 'a+') as f:
             line = 'Epoch: {}; Train total loss: {:.3f}; Train final loss: {:.3f}; Eval final loss: {:.3f}; Clf loss: {:.3f}; Regr loss: {:.3f}; Best eval loss: {:.3f}\n'\
