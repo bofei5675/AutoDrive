@@ -1,4 +1,3 @@
-
 from utils import *
 from train import CarDataset, train_model, evaluate_model
 from torch.optim import lr_scheduler
@@ -6,8 +5,8 @@ from sklearn.model_selection import train_test_split
 import torch
 import argparse
 import gc
-from torchvision.transforms import ToPILImage, ToTensor, RandomRotation, RandomHorizontalFlip,\
-    Compose, Resize
+from torchvision.transforms import ToPILImage, ToTensor, RandomRotation, RandomHorizontalFlip, \
+    Compose, Resize, Normalize
 from models.model_hg import HourglassNet
 from models.model_hg2 import PoseNet
 import os
@@ -18,10 +17,13 @@ from albumentations import (
     RGBShift, MotionBlur, Blur, GaussNoise, ChannelShuffle
 )
 
+import warnings
+warnings.filterwarnings("ignore")
+
 
 def str2bool(v):
     if isinstance(v, bool):
-       return v
+        return v
     if v.lower() in ('yes', 'true', 'True', 't', 'y', '1'):
         return True
     elif v.lower() in ('no', 'false', 'False', 'f', 'n', '0'):
@@ -36,7 +38,7 @@ def parse_args():
     args.add_argument('-m', '--model', type=str, dest='model_type', default='HG2',
                       choices=['UNet', 'HG', 'HG2'])
     args.add_argument('-ns', '--n-stacks', type=int, dest='num_stacks', default=8)
-    args.add_argument('-nc', '--n-classes',  type=int, dest='num_classes', default=8)
+    args.add_argument('-nc', '--n-classes', type=int, dest='num_classes', default=8)
     args.add_argument('-nf', '--n-features', type=int, dest='num_features', default=256)
     args.add_argument('-bs', '--batch_size', type=int, dest='batch_size', default=2)
     args.add_argument('-e', '--epoch', type=int, dest='epoch', default=30)
@@ -60,7 +62,7 @@ def main():
     args = parse_args()
     current_time = time.strftime("%Y-%m-%d_%H-%M-%S", time.gmtime())
     model_name = 'model_{}_stack_{}_features_{}_{}_' if args.prob <= 0 else 'model_aug_{}_stack_{}_features_{}_{}_'
-    save_dir = args.save_dir + model_name.format(args.model_type, args.num_stacks, args.num_features, args.loss_type)\
+    save_dir = args.save_dir + model_name.format(args.model_type, args.num_stacks, args.num_features, args.loss_type) \
                + current_time + '/'
     train_images_dir = PATH + 'train_images/{}.jpg'
     train = pd.read_csv(PATH + 'train_fixed.csv')  # .sample(n=20).reset_index()
@@ -77,7 +79,8 @@ def main():
     albu_list = [RandomBrightnessContrast(brightness_limit=(-0.3, 0.3), contrast_limit=(-0.3, 0.3), p=0.3),
                  RandomGamma(p=0.2), HueSaturationValue(p=0.3), RGBShift(p=0.3), MotionBlur(p=0.1), Blur(p=0.1),
                  GaussNoise(var_limit=(20, 100), p=0.2),
-                 ChannelShuffle(p=0.2)]
+                 ChannelShuffle(p=0.2),
+                 Normalize(mean=[145.3834, 136.9748, 122.7390], std=[95.1996, 94.6686, 85.9170])]
 
     transform = Compose(albu_list, p=args.prob)
 
@@ -129,18 +132,20 @@ def main():
     for epoch in range(n_epochs):
         torch.cuda.empty_cache()
         gc.collect()
-        train_loss, train_final_loss = train_model(save_dir, model, epoch, train_loader, device, optimizer, exp_lr_scheduler, history,
-                                 args)
-        best_loss, eval_loss, clf_losses, regr_losses = evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, history, args)
+        train_loss, train_final_loss = train_model(save_dir, model, epoch, train_loader, device, optimizer,
+                                                   exp_lr_scheduler, history,
+                                                   args)
+        best_loss, eval_loss, clf_losses, regr_losses = evaluate_model(model, epoch, dev_loader, device, best_loss,
+                                                                       save_dir, history, args)
         with open(save_dir + 'log.txt', 'a+') as f:
-            line = 'Epoch: {}; Train total loss: {:.3f}; Train final loss: {:.3f}; Eval final loss: {:.3f}; Clf loss: {:.3f}; Regr loss: {:.3f}; Best eval loss: {:.3f}\n'\
+            line = 'Epoch: {}; Train total loss: {:.3f}; Train final loss: {:.3f}; Eval final loss: {:.3f}; Clf loss: {:.3f}; Regr loss: {:.3f}; Best eval loss: {:.3f}\n' \
                 .format(epoch,
-                train_loss,
-                train_final_loss,
-                eval_loss,
-                clf_losses,
-                regr_losses,
-                best_loss)
+                        train_loss,
+                        train_final_loss,
+                        eval_loss,
+                        clf_losses,
+                        regr_losses,
+                        best_loss)
             f.write(line)
         history.to_csv(save_dir + 'history.csv', index=False)
 
