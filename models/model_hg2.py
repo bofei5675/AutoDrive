@@ -1,6 +1,7 @@
 from torch import nn
 import torch
 import torch.nn.functional as F
+from .cbam import CBAM
 Pool = nn.MaxPool2d
 
 
@@ -32,7 +33,7 @@ class Conv(nn.Module):
 
 
 class Residual(nn.Module):
-    def __init__(self, inp_dim, out_dim):
+    def __init__(self, inp_dim, out_dim, use_cbam=False):
         super(Residual, self).__init__()
         self.relu = nn.ReLU()
         self.bn1 = nn.BatchNorm2d(inp_dim)
@@ -46,6 +47,9 @@ class Residual(nn.Module):
             self.need_skip = False
         else:
             self.need_skip = True
+        self.use_cbam = use_cbam
+        if self.use_cbam:
+            self.cbam = CBAM(out_dim)
 
     def forward(self, x):
         if self.need_skip:
@@ -62,24 +66,26 @@ class Residual(nn.Module):
         out = self.relu(out)
         out = self.conv3(out)
         out += residual
+        if self.use_cbam:
+            out = self.cbam(out)
         return out
 
 
 class Hourglass(nn.Module):
-    def __init__(self, n, f, bn=None, increase=0):
+    def __init__(self, n, f, bn=None, increase=0, use_cbam=False):
         super(Hourglass, self).__init__()
         nf = f + increase
-        self.up1 = Residual(f, f)
+        self.up1 = Residual(f, f, use_cbam)
         # Lower branch
         self.pool1 = Pool(2, 2)
-        self.low1 = Residual(f, nf)
+        self.low1 = Residual(f, nf, use_cbam=use_cbam)
         self.n = n
         # Recursive hourglass
         if self.n > 1:
-            self.low2 = Hourglass(n - 1, nf, bn=bn)
+            self.low2 = Hourglass(n - 1, nf, bn=bn, use_cbam=use_cbam)
         else:
-            self.low2 = Residual(nf, nf)
-        self.low3 = Residual(nf, f)
+            self.low2 = Residual(nf, nf, use_cbam=use_cbam)
+        self.low3 = Residual(nf, f, use_cbam=use_cbam)
         # self.up2 = nn.Upsample(scale_factor=2, mode='nearest')
         self.up2 = F.upsample
 
@@ -113,26 +119,28 @@ class Merge(nn.Module):
 
 
 class PoseNet(nn.Module):
-    def __init__(self, nstack, inp_dim, oup_dim, bn=False, increase=0, **kwargs):
+    def __init__(self, nstack, inp_dim, oup_dim, bn=False, increase=0, use_cbam=False,**kwargs):
         super(PoseNet, self).__init__()
 
         self.nstack = nstack
+        self.use_cbam = use_cbam
         self.pre = nn.Sequential(
             Conv(3, 64, 7, 2, bn=True, relu=True),
-            Residual(64, 128),
+            Residual(64, 128, use_cbam),
             Pool(2, 2),
-            Residual(128, 128),
-            Residual(128, inp_dim)
+            Residual(128, 128, use_cbam),
+            Residual(128, inp_dim, use_cbam)
         )
+
 
         self.hgs = nn.ModuleList([
             nn.Sequential(
-                Hourglass(4, inp_dim, bn, increase),
+                Hourglass(4, inp_dim, bn, increase, use_cbam),
             ) for i in range(nstack)])
 
         self.features = nn.ModuleList([
             nn.Sequential(
-                Residual(inp_dim, inp_dim),
+                Residual(inp_dim, inp_dim, use_cbam),
                 Conv(inp_dim, inp_dim, 1, bn=True, relu=True)
             ) for i in range(nstack)])
 

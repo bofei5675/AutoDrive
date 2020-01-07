@@ -37,8 +37,8 @@ def parse_args():
     args.add_argument('-sd', '--save-dir', type=str, dest='save_dir', default='run/')
     args.add_argument('-m', '--model', type=str, dest='model_type', default='HG2',
                       choices=['UNet', 'HG', 'HG2'])
-    args.add_argument('-ns', '--n-stacks', type=int, dest='num_stacks', default=8)
-    args.add_argument('-nc', '--n-classes', type=int, dest='num_classes', default=8)
+    args.add_argument('-ns', '--n-stacks', type=int, dest='num_stacks', default=2)
+    args.add_argument('-nc', '--n-classes',  type=int, dest='num_classes', default=8)
     args.add_argument('-nf', '--n-features', type=int, dest='num_features', default=256)
     args.add_argument('-bs', '--batch_size', type=int, dest='batch_size', default=2)
     args.add_argument('-e', '--epoch', type=int, dest='epoch', default=30)
@@ -54,6 +54,8 @@ def parse_args():
     args.add_argument('-g', '--gamma', type=float, dest='gamma', default=1, help='Weights for regression loss')
     args.add_argument('-vs', '--val-size', type=float, dest='val_size',
                       default=0.05, help='Validation data set size ratio')
+    args.add_argument('-uc', '--use-cbam', type=str2bool, dest='use_cbam',
+                      default='no', help='whether to use attention mechansim')
 
     return args.parse_args()
 
@@ -62,7 +64,9 @@ def main():
     args = parse_args()
     current_time = time.strftime("%Y-%m-%d_%H-%M-%S", time.gmtime())
     model_name = 'model_{}_stack_{}_features_{}_{}_' if args.prob <= 0 else 'model_aug_{}_stack_{}_features_{}_{}_'
-    save_dir = args.save_dir + model_name.format(args.model_type, args.num_stacks, args.num_features, args.loss_type) \
+
+    model_name += 'cbam_' if args.use_cbam else ''
+    save_dir = args.save_dir + model_name.format(args.model_type, args.num_stacks, args.num_features, args.loss_type)\
                + current_time + '/'
     train_images_dir = PATH + 'train_images/{}.jpg'
     train = pd.read_csv(PATH + 'train_fixed.csv')  # .sample(n=20).reset_index()
@@ -104,7 +108,8 @@ def main():
         model = HourglassNet(nStacks=args.num_stacks, nModules=1, nFeat=args.num_features, nClasses=args.num_classes)
         model.cuda()
     elif args.model_type == 'HG2':
-        model = PoseNet(nstack=args.num_stacks, inp_dim=args.num_features, oup_dim=args.num_classes)
+        model = PoseNet(nstack=args.num_stacks, inp_dim=args.num_features,
+                        oup_dim=args.num_classes, use_cbam=args.use_cbam)
         model = model.cuda()
         if args.num_stacks <= 2 and args.pre_train:
             save = torch.load('./weights/checkpoint_2hg.pt')
