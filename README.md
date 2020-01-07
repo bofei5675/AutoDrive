@@ -1,10 +1,12 @@
 # Peking University/Baidu - Autonomous Driving
 ## Best Model Configuration
 Current Score: **0.065**
+
 Configuration:
 ```
 Namespace(alpha=2, batch_size=2, beta=4, debug=False, epoch=30, gamma=10.0, loss_type='FL', model_type='HG2', num_classes=8, num_features=256, num_stacks=4, pre_train=True, prob=0.2, save_dir='run_large_val/', sigma=1, val_size=0.2)
 ```
+Decoding with threshold=-0.5
 ## Some facts
 Training data
 1. average cars number: 11.418839558374442, sum of cars: 48610
