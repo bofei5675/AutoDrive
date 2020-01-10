@@ -53,7 +53,7 @@ def main():
     save_dir = '/'.join(save_dir)
     test = pd.read_csv(PATH + 'sample_submission.csv')
     test['PredictionString'] = predictions
-    test.to_csv(save_dir + '/predictions_{}.csv'.format(args.threshold), index=False)
+    test.to_csv(save_dir + '/predictions2_{}.csv'.format(args.threshold), index=False)
     test = add_number_of_cars(test)
     avg_cars, sum_cars = test.numcars.mean(), test.numcars.sum()
     with open(save_dir +'/stats_{}.txt'.format(args.threshold), 'a+') as f:

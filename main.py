@@ -1,4 +1,3 @@
-
 from utils import *
 from train import CarDataset, CarDatasetUnsup, train_model, evaluate_model
 from torch.optim import lr_scheduler
@@ -6,7 +5,7 @@ from sklearn.model_selection import train_test_split
 import torch
 import argparse
 import gc
-from torchvision.transforms import ToPILImage, ToTensor, RandomRotation, RandomHorizontalFlip,\
+from torchvision.transforms import ToPILImage, ToTensor, RandomRotation, RandomHorizontalFlip, \
     Compose, Resize
 from models.model_hg import HourglassNet
 from models.model_hg2 import PoseNet
@@ -15,13 +14,17 @@ import time
 import torch.nn as nn
 from albumentations import (
     RandomBrightnessContrast, Compose, RandomGamma, HueSaturationValue,
-    RGBShift, MotionBlur, Blur, GaussNoise, ChannelShuffle
+    RGBShift, MotionBlur, Blur, GaussNoise, ChannelShuffle, Normalize
 )
+
+import warnings
+
+warnings.filterwarnings("ignore")
 
 
 def str2bool(v):
     if isinstance(v, bool):
-       return v
+        return v
     if v.lower() in ('yes', 'true', 'True', 't', 'y', '1'):
         return True
     elif v.lower() in ('no', 'false', 'False', 'f', 'n', '0'):
@@ -36,7 +39,7 @@ def parse_args():
     args.add_argument('-m', '--model', type=str, dest='model_type', default='HG2',
                       choices=['UNet', 'HG', 'HG2'])
     args.add_argument('-ns', '--n-stacks', type=int, dest='num_stacks', default=2)
-    args.add_argument('-nc', '--n-classes',  type=int, dest='num_classes', default=8)
+    args.add_argument('-nc', '--n-classes', type=int, dest='num_classes', default=8)
     args.add_argument('-nf', '--n-features', type=int, dest='num_features', default=256)
     args.add_argument('-bs', '--batch_size', type=int, dest='batch_size', default=2)
     args.add_argument('-e', '--epoch', type=int, dest='epoch', default=30)
@@ -56,6 +59,8 @@ def parse_args():
                       default='no', help='whether to use attention mechansim')
     args.add_argument('-uns', '--unsupervise-param', type=float, dest='unsupervise', help='If use UDA',
                       default=0)
+    args.add_argument('-norm', '--normalized', type=str2bool, dest='normalized',
+                      help='If use pre-computed value to normalize images', default='no')
 
     return args.parse_args()
 
@@ -63,10 +68,11 @@ def parse_args():
 def main():
     args = parse_args()
     current_time = time.strftime("%Y-%m-%d_%H-%M-%S", time.gmtime())
-    model_name = 'model_{}_stack_{}_features_{}_{}_' if args.prob <= 0 else 'model_aug_{}_stack_{}_features_{}_{}_'
+    model_name = 'model_{}_stack_{}_feat_{}_g_{}_{}_' if args.prob <= 0 else 'model_aug_{}_stack_{}_feat_{}_g_{}_{}_'
     model_name += 'cbam_' if args.use_cbam else ''
     model_name += 'unsup_' if args.unsupervise != 0 else ''
-    save_dir = args.save_dir + model_name.format(args.model_type, args.num_stacks, args.num_features, args.loss_type)\
+    model_name += 'norm_' if args.normalized else ''
+    save_dir = args.save_dir + model_name.format(args.model_type, args.num_stacks, args.num_features, args.gamma, args.loss_type)\
                + current_time + '/'
     train_images_dir = PATH + 'train_images/{}.jpg'
     train = pd.read_csv(PATH + 'train_fixed.csv')  # .sample(n=20).reset_index()
@@ -82,13 +88,16 @@ def main():
     albu_list = [RandomBrightnessContrast(brightness_limit=(-0.3, 0.3), contrast_limit=(-0.3, 0.3), p=0.3),
                  RandomGamma(p=0.2), HueSaturationValue(p=0.3), RGBShift(p=0.3), MotionBlur(p=0.1), Blur(p=0.1),
                  GaussNoise(var_limit=(20, 100), p=0.2),
-                 ChannelShuffle(p=0.2)]
+                 ChannelShuffle(p=0.2),
+                 #Normalize(mean=[145.3834, 136.9748, 122.7390], std=[95.1996, 94.6686, 85.9170])
+                 ]
 
     transform = Compose(albu_list, p=args.prob)
 
     # Create dataset objects
-    train_dataset = CarDataset(df_train, train_images_dir, sigma=args.sigma, training=True, transform=transform)
-    dev_dataset = CarDataset(df_dev, train_images_dir, sigma=args.sigma, training=False)
+    train_dataset = CarDataset(df_train, train_images_dir, sigma=args.sigma, training=True, transform=transform,
+                               normalized=args.normalized)
+    dev_dataset = CarDataset(df_dev, train_images_dir, sigma=args.sigma, training=False, normalized=args.normalized)
     BATCH_SIZE = args.batch_size
 
     # Create data generators - they will produce batches
@@ -98,7 +107,7 @@ def main():
     # Gets the GPU if there is one, otherwise the cpu
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(device)
-    print('Running on', torch.cuda.get_device_name())
+    print('Running on', torch.cuda.get_device_name(), 'x', torch.cuda.device_count())
     n_epochs = args.epoch
     if args.model_type == 'UNet':
         model = MyUNet(args.num_classes).to(device)
@@ -136,10 +145,11 @@ def main():
     # unsupervise part
     test_images_dir = PATH + 'test_images/{}.jpg'
     test = pd.read_csv(PATH + 'sample_submission.csv')
-    test = test.sample(n=train.shape[0] // 2, replace=True)#.reset_index()
+    test = test.sample(n=train.shape[0], replace=True)#.reset_index()
     transform_test = Compose(albu_list, p=1)
-    test_dataset = CarDatasetUnsup(test, test_images_dir, sigma=args.sigma, training= args.unsupervise != 0, transform=transform_test)
-    test_loader = DataLoader(dataset=test_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
+    test_dataset = CarDatasetUnsup(test, test_images_dir, sigma=args.sigma, training= args.unsupervise != 0, transform=transform_test,
+                                   normalized=args.normalized)
+    test_loader = DataLoader(dataset=test_dataset, batch_size=BATCH_SIZE // 2, shuffle=True, num_workers=4)
 
     for epoch in range(n_epochs):
         torch.cuda.empty_cache()
@@ -149,14 +159,14 @@ def main():
                                                     args)
         best_loss, eval_loss, clf_losses, regr_losses = evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, history, args)
         with open(save_dir + 'log.txt', 'a+') as f:
-            line = 'Epoch: {}; Train total loss: {:.3f}; Train final loss: {:.3f}; Eval final loss: {:.3f}; Clf loss: {:.3f}; Regr loss: {:.3f}; Best eval loss: {:.3f}\n'\
+            line = 'Epoch: {}; Train total loss: {:.3f}; Train final loss: {:.3f}; Eval final loss: {:.3f}; Clf loss: {:.3f}; Regr loss: {:.3f}; Best eval loss: {:.3f}\n' \
                 .format(epoch,
-                train_loss,
-                train_final_loss,
-                eval_loss,
-                clf_losses,
-                regr_losses,
-                best_loss)
+                        train_loss,
+                        train_final_loss,
+                        eval_loss,
+                        clf_losses,
+                        regr_losses,
+                        best_loss)
             f.write(line)
         history.to_csv(save_dir + 'history.csv', index=False)
 

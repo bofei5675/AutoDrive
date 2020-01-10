@@ -1,6 +1,6 @@
-import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
+import pandas as pd  # data processing, CSV file I/O (e.g. pd.read_csv)
 import cv2
-from tqdm import tqdm#_notebook as tqdm
+from tqdm import tqdm  # _notebook as tqdm
 import matplotlib.pyplot as plt
 import seaborn as sns
 from functools import reduce
@@ -16,24 +16,56 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import models
 from torchvision import transforms, utils
 from efficientnet_pytorch import EfficientNet
-from utils import imread, preprocess_image, get_mask_and_regr,\
+from utils import imread, preprocess_image, get_mask_and_regr, \
     IMG_WIDTH, IMG_HEIGHT, MODEL_SCALE, load_my_state_dict
-
+import gc
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-camera_matrix = np.array([[2304.5479, 0,  1686.2379],
+camera_matrix = np.array([[2304.5479, 0, 1686.2379],
                           [0, 2305.8757, 1354.9849],
                           [0, 0, 1]], dtype=np.float32)
 
+# normalization value
+means = np.array([145.3834, 136.9748, 122.7390]).reshape(1, 1, 3)
+stds = np.array([95.1996, 94.6686, 85.9170]).reshape(1, 1, 3)
+
+
+# for original image sizes:
+# means = np.array([145.375023, 136.948063, 122.689194]).reshape(1,1,3)
+# stds = np.array([95.254658, 94.717646, 85.960257]).reshape(1,1,3)
+
+def normalize(img, means, stds):
+    return (img - means) / stds
+
+
+def denormalize(img, means, stds, resize_to_original=False):
+    """
+    input is numpy
+    convert back to (0,255) and moveaxis from 3,x,x to x,x,3 after denormalizing - multiply by stds and add means
+    img is a torch tensor"""
+
+    img = np.moveaxis(img, 0, 2)
+    img = img * stds + means
+    img = np.clip(img, 0, 255).astype('uint8')
+
+    if resize_to_original:
+        # revert def preprocess_image()
+        img = img[:, (img_w // 4): (img_w - img_w // 4), :]
+        img = cv2.copyMakeBorder(img, img.shape[0], 0, 0, 0, cv2.BORDER_CONSTANT)  # , borderType)
+        img = cv2.resize(img, (img_orig_w, img_orig_h))
+
+    return img
 
 class CarDataset(Dataset):
     """Car dataset."""
 
-    def __init__(self, dataframe, root_dir, sigma=1, training=True, transform=None):
+    def __init__(self, dataframe, root_dir, sigma=1, training=True, transform=None, unsupervise=False, normalized=False):
         self.df = dataframe
         self.root_dir = root_dir
         self.transform = transform
         self.training = training
         self.sigma = sigma
+        self.unsupervise = unsupervise
+        self.normalized = normalized
 
     def __len__(self):
         return len(self.df)
@@ -57,8 +89,9 @@ class CarDataset(Dataset):
         # augmentation
         if self.transform:
             img = self.transform(image=img)['image']
+        if self.normalized:
+            img = normalize(img, means, stds)
         img = np.rollaxis(img, 2, 0)
-
 
         # Get mask and regression maps
         mask, regr, heatmap = get_mask_and_regr(img0, labels,
@@ -71,12 +104,13 @@ class CarDataset(Dataset):
 class CarDatasetUnsup(Dataset):
     """Car dataset."""
 
-    def __init__(self, dataframe, root_dir, sigma=1, training=True, transform=None):
+    def __init__(self, dataframe, root_dir, sigma=1, training=True, transform=None, normalized=False):
         self.df = dataframe
         self.root_dir = root_dir
         self.transform = transform
         self.training = training
         self.sigma = sigma
+        self.normalized = normalized
 
     def __len__(self):
         return len(self.df)
@@ -99,6 +133,10 @@ class CarDatasetUnsup(Dataset):
         if self.transform:
             img1 = self.transform(image=img)['image']
             img2 = self.transform(image=img)['image']
+
+        if self.normalized:
+            img1 = normalize(img1, means, stds)
+            img2 = normalize(img2, means, stds)
 
         img1 = np.rollaxis(img1, 2, 0)
         img2 = np.rollaxis(img2, 2, 0)
@@ -126,7 +164,7 @@ class double_conv(nn.Module):
 
 
 class up(nn.Module):
-    def __init__(self, in_ch, mid_ch,out_ch, bilinear=True):
+    def __init__(self, in_ch, mid_ch, out_ch, bilinear=True):
         super(up, self).__init__()
 
         #  would be a nice idea if the upsampling could be learned too,
@@ -152,7 +190,7 @@ class up(nn.Module):
         # for padding issues, see
         # https://github.com/HaiyongJiang/U-Net-Pytorch-Unstructured-Buggy/commit/0e854509c2cea854e247a9c615f175f76fbb2e3a
         # https://github.com/xiaopeng-liao/Pytorch-UNet/commit/8ebac70e633bac59fc22bb5195e513d5832fb3bd
-        #print(x1.shape, x2.shape)
+        # print(x1.shape, x2.shape)
         if x2 is not None:
             x = torch.cat([x2, x1], dim=1)
         else:
@@ -210,11 +248,19 @@ class MyUNet(nn.Module):
 
 # pixel wise focal loss
 def focal_loss(pred, true, mask, alpha, beta):
-    focal_weights = torch.where(torch.eq(mask,  1), torch.pow(1. - pred, alpha), torch.pow(pred,  beta))
-    bce = - (true * torch.log(pred + 1e-12) + (1 - true) * torch.log(1 - pred + 1e-12))
-    loss = focal_weights * bce
+    focal_weights = torch.where(torch.eq(mask, 1), torch.pow(1. - pred, alpha),
+                                torch.pow(pred, alpha) * torch.pow(1 - true, beta))
+    # normalize the weigts such that it sums to 1.
+    #print(focal_weights.mean(dim=(1, 2)), focal_weights.sum(dim=(1, 2)))
+    focal_weights = focal_weights #/ focal_weights.sum(dim=(1, 2)).unsqueeze(dim=1).unsqueeze(dim=2)
+    bce = - (mask * torch.log(pred + 1e-12) + (1 - mask) * torch.log(1 - pred + 1e-12))
+    # print(bce.mean(dim=(1, 2)))
+    # print(focal_weights.shape, bce.shape, mask.shape, mask.sum(dim=(1, 2)).shape)
+    N = mask.sum(dim=(1, 2)).unsqueeze(dim=1).unsqueeze(dim=2)
+    loss = focal_weights * bce # / N
     # loss = pos_loss + neg_loss
-    loss = loss.mean(0).sum()
+    loss = loss.mean(0).sum() # average focal loss for each sample
+    # print('bce', bce.mean(0).sum().data, 'fl', loss.data)
     return loss
 
 
@@ -242,11 +288,11 @@ def criterion(prediction, mask, regr, heatmap,
     '''
     # Binary mask loss
     pred_mask = torch.sigmoid(prediction[:, 0])
-    if loss_type=='BCE':
+    if loss_type == 'BCE':
         #    mask_loss = mask * (1 - pred_mask)**2 * torch.log(pred_mask + 1e-12) + (1 - mask) * pred_mask**2 * torch.log(1 - pred_mask + 1e-12)
         mask_loss = mask * torch.log(pred_mask + 1e-12) + (1 - mask) * torch.log(1 - pred_mask + 1e-12)
         mask_loss = -mask_loss.mean(0).sum()
-    elif loss_type == 'FL': # focal loss
+    elif loss_type == 'FL':  # focal loss
         mask_loss = focal_loss(pred_mask, heatmap, mask, alpha, beta)
     elif loss_type == 'MSE':
         mask_loss = mse_loss(pred_mask, heatmap)
@@ -279,10 +325,10 @@ def train_model(save_dir, model, epoch, train_loader, test_loader, device, optim
     bar = tqdm(total=len(train_loader), desc='Processing', ncols=90)
     for batch_idx, ((img_batch, mask_batch, regr_batch, heatmap_batch), (img1, img2) )in enumerate(zip(train_loader, test_loader)):
         # print('Train loop:', img_batch.shape)
-        img_batch = img_batch.to(device)
+        img_batch = img_batch.float().to(device)
         mask_batch = mask_batch.to(device)
         regr_batch = regr_batch.to(device)
-        heatmap_batch = heatmap_batch.to(device)
+        heatmap_batch = heatmap_batch.float().to(device)
         output = model(img_batch)
         if type(output) is list:
             loss = 0
@@ -291,27 +337,37 @@ def train_model(save_dir, model, epoch, train_loader, test_loader, device, optim
                                                            size_average=True, loss_type=args.loss_type,
                                                            alpha=args.alpha, beta=args.beta,
                                                            gamma=args.gamma)
-                if not unsupervise:
-                    loss += loss_turn
-                else:
-                    img1 = img1.to(device)
-                    img2 = img2.to(device)
-                    pred1 = model(img1)
-                    pred2 = model(img2)
-                    unsup_loss = mse_loss(pred1, pred2)
-                    loss = loss_turn + args.unsupervise * unsup_loss
-                    unsupervise_loss += args.unsupervise * unsup_loss.item()
-                stack_losses[idx] += loss_turn.item()
 
+                loss += loss_turn
+                stack_losses[idx] += loss_turn.item()
                 if idx == len(output) - 1:
                     epoch_loss += loss_turn.item()
-            # add final stack  value
 
+            del img_batch, mask_batch, regr_batch, heatmap_batch, output
+            gc.collect()
+            # add final stack  value
             clf_losses += clf_loss.item()
             regr_losses += regr_loss.item()
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            if unsupervise:
+                torch.cuda.empty_cache()
+                img1 = img1.to(device)
+                img2 = img2.to(device)
+                preds1 = model(img1)
+                preds2 = model(img2)
+                loss = 0
+                for pred1, pred2 in zip(preds1, preds2):
+                    unsup_loss = mse_loss(pred1, pred2)
+                    loss += args.unsupervise * unsup_loss
+                unsupervise_loss += loss.item()
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                del img1, img2, pred1, pred2
+                gc.collect()
+
         bar.update(1)
         exp_lr_scheduler.step()
         if batch_idx % EVAL_INTERVAL == 0 or batch_idx == total_batches - 1:
@@ -334,7 +390,7 @@ def train_model(save_dir, model, epoch, train_loader, test_loader, device, optim
         optimizer.state_dict()['param_groups'][0]['lr'],
         final_loss)
     print(line)
-    return epoch_loss / len(train_loader), final_loss / len(train_loader)
+    return total_loss / len(train_loader), final_loss / len(train_loader)
 
 
 def save_model(model, dir, epoch):
@@ -344,8 +400,7 @@ def save_model(model, dir, epoch):
     torch.save(model, dir + 'model_{}.pth'.format(epoch))
 
 
-def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, history=None, args = None):
-
+def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, history=None, args=None):
     model.eval()
     bar = tqdm(total=len(dev_loader), desc='Processing', ncols=90)
     with torch.no_grad():
@@ -353,10 +408,10 @@ def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, histor
         clf_losses = 0
         regr_losses = 0
         for img_batch, mask_batch, regr_batch, heatmap_batch in dev_loader:
-            img_batch = img_batch.to(device)
+            img_batch = img_batch.float().to(device)
             mask_batch = mask_batch.to(device)
             regr_batch = regr_batch.to(device)
-            heatmap_batch = heatmap_batch.to(device)
+            heatmap_batch = heatmap_batch.float().to(device)
             output = model(img_batch)
 
             if type(output) is list:
@@ -382,6 +437,6 @@ def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, histor
         history.loc[epoch, 'dev_total_loss'] = total_loss
         history.loc[epoch, 'dev_final_loss'] = final_loss
 
-    print('Val total loss: {:.3f}; Final stack loss: {:.3f}; Clf loss: {:.3f}; Regr loss: {:.3f}'\
+    print('Val total loss: {:.3f}; Final stack loss: {:.3f}; Clf loss: {:.3f}; Regr loss: {:.3f}' \
           .format(total_loss, final_loss, clf_losses, regr_losses))
     return best_loss, final_loss, clf_losses, regr_losses

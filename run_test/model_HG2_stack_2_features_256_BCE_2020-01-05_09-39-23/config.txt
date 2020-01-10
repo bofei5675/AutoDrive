@@ -1,1 +1,0 @@
-Namespace(alpha=2, batch_size=2, beta=4, debug=False, epoch=30, loss_type='BCE', model_type='HG2', num_classes=8, num_features=256, num_stacks=2, pre_train=True, prob=0.1, save_dir='run_test/', sigma=1)
