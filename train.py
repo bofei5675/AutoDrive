@@ -16,7 +16,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import models
 from torchvision import transforms, utils
 from efficientnet_pytorch import EfficientNet
-from utils import imread, preprocess_image, get_mask_and_regr, \
+from utils import imread, preprocess_image, preprocess_mask, get_mask_and_regr, \
     IMG_WIDTH, IMG_HEIGHT, MODEL_SCALE, load_my_state_dict
 import gc
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -58,9 +58,13 @@ def denormalize(img, means, stds, resize_to_original=False):
 class CarDataset(Dataset):
     """Car dataset."""
 
-    def __init__(self, dataframe, root_dir, sigma=1, training=True, transform=None, unsupervise=False, normalized=False):
+    def __init__(self, dataframe, root_dir,
+                 root_dir_dropmasks='./data/test_masks/{}.jpg',
+                 sigma=1, training=True,
+                 transform=None, unsupervise=False, normalized=False):
         self.df = dataframe
         self.root_dir = root_dir
+        self.root_dir_dropmasks = root_dir_dropmasks
         self.transform = transform
         self.training = training
         self.sigma = sigma
@@ -82,7 +86,17 @@ class CarDataset(Dataset):
         flip = False
         if self.training:
             flip = np.random.randint(2) == 1
+            dropmask = 0
+        else:
+            dropmask_name = self.root_dir_dropmasks.format(idx)
+            if os.path.isfile(dropmask_name):
+                dropmask = imread(dropmask_name, True)  # , 'test_masks', idx+'.jpg'))
+                dropmask = preprocess_mask(dropmask)
 
+            else:
+                dropmask = np.zeros((IMG_HEIGHT, IMG_WIDTH, 3))
+
+            dropmask = np.rollaxis(dropmask, 2, 0)
         # Read image
         img0 = imread(img_name, True)
         img = preprocess_image(img0, flip=flip)
@@ -99,7 +113,12 @@ class CarDataset(Dataset):
                                                 flip=flip)
         regr = np.rollaxis(regr, 2, 0)
 
-        return [img, mask, regr, heatmap]
+        img = torch.as_tensor(img, dtype=torch.float32)  # /255)
+        regr = torch.as_tensor(regr, dtype=torch.float32)
+        dropmask = torch.as_tensor(dropmask, dtype=torch.float32)
+        heatmap = torch.as_tensor(heatmap, dtype=torch.float32)
+
+        return [img, mask, regr, heatmap, dropmask]
 
 class CarDatasetUnsup(Dataset):
     """Car dataset."""
@@ -323,7 +342,7 @@ def train_model(save_dir, model, epoch, train_loader, test_loader, device, optim
     lambda_ = args.unsupervise
     unsupervise = args.unsupervise != 0
     bar = tqdm(total=len(train_loader), desc='Processing', ncols=90)
-    for batch_idx, ((img_batch, mask_batch, regr_batch, heatmap_batch), (img1, img2) )in enumerate(zip(train_loader, test_loader)):
+    for batch_idx, ((img_batch, mask_batch, regr_batch, heatmap_batch, _), (img1, img2) )in enumerate(zip(train_loader, test_loader)):
         # print('Train loop:', img_batch.shape)
         img_batch = img_batch.float().to(device)
         mask_batch = mask_batch.to(device)
@@ -370,7 +389,7 @@ def train_model(save_dir, model, epoch, train_loader, test_loader, device, optim
 
         bar.update(1)
         exp_lr_scheduler.step()
-        if batch_idx % EVAL_INTERVAL == 0 or batch_idx == total_batches - 1:
+        if (batch_idx + 1) % EVAL_INTERVAL == 0 or batch_idx == total_batches - 1:
             total_loss = np.mean(stack_losses)
             with open(save_dir + 'log.txt', 'a+') as f:
                 line = '{} | {} | Total Loss: {:.3f}, Stack Loss:{:.3f}; Clf loss: {:.3f}; Regr loss: {:.3f}; Unsup loss: {:.3f}\n'\
@@ -407,7 +426,7 @@ def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, histor
         stack_loss = np.zeros(args.num_stacks)
         clf_losses = 0
         regr_losses = 0
-        for img_batch, mask_batch, regr_batch, heatmap_batch in dev_loader:
+        for img_batch, mask_batch, regr_batch, heatmap_batch, _ in dev_loader:
             img_batch = img_batch.float().to(device)
             mask_batch = mask_batch.to(device)
             regr_batch = regr_batch.to(device)

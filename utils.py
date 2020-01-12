@@ -82,6 +82,15 @@ def _regr_back(regr_dict):
     return regr_dict
 
 
+def preprocess_mask(img):
+    img = img[img.shape[0] // 2:]
+    bg = np.ones_like(img) * img.mean(1, keepdims=True).astype(img.dtype)
+    bg = bg[:, :img.shape[1] // 6]
+    img = np.concatenate([bg, img, bg], 1)
+    img = cv2.resize(img, (IMG_WIDTH, IMG_HEIGHT))
+    return img
+
+
 def preprocess_image(img, flip=False):
     img = img[img.shape[0] // 2:]
     bg = np.ones_like(img) * img.mean(1, keepdims=True).astype(img.dtype)
@@ -216,6 +225,7 @@ def extract_coords(prediction, threshold=0):
         coords[-1]['x'], coords[-1]['y'], coords[-1]['z'] = optimize_xy(r, c, coords[-1]['x'], coords[-1]['y'],
                                                                         coords[-1]['z'])
     coords = clear_duplicates(coords)
+    #print('Length:',len(coords))
     return coords
 
 
@@ -308,3 +318,13 @@ def remove_out_image_cars(df):
     df.rename(columns={'new_pred_string': 'PredictionString'}, inplace=True)
     print(df.head())
     return df
+
+
+def save_submission_file(test, save_dir, predictions, threshold, name=''):
+    test['PredictionString'] = predictions
+    test.to_csv(save_dir + '/predictions_{}_{}.csv'.format(name, threshold), index=False)
+    test = add_number_of_cars(test)
+    avg_cars, sum_cars = test.numcars.mean(), test.numcars.sum()
+    with open(save_dir + '/stats_{}_{}.txt'.format(name, threshold), 'a+') as f:
+        f.write('Average:' + str(avg_cars) + '\n')
+        f.write('Total:' + str(avg_cars) + '\n')
