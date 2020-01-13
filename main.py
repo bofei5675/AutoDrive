@@ -12,6 +12,7 @@ from models.model_hg2 import PoseNet
 import os
 import time
 import torch.nn as nn
+from models.centernet_models import create_model
 from albumentations import (
     RandomBrightnessContrast, Compose, RandomGamma, HueSaturationValue,
     RGBShift, MotionBlur, Blur, GaussNoise, ChannelShuffle, Normalize
@@ -35,9 +36,9 @@ def str2bool(v):
 
 def parse_args():
     args = argparse.ArgumentParser()
-    args.add_argument('-sd', '--save-dir', type=str, dest='save_dir', default='run/')
-    args.add_argument('-m', '--model', type=str, dest='model_type', default='HG2',
-                      choices=['UNet', 'HG', 'HG2'])
+    args.add_argument('-sd', '--save-dir', type=str, dest='save_dir', default='run_test/')
+    args.add_argument('-m', '--model', type=str, dest='model_type', default='LHG',
+                      choices=['UNet', 'HG', 'HG2', 'LHG'])
     args.add_argument('-ns', '--n-stacks', type=int, dest='num_stacks', default=2)
     args.add_argument('-nc', '--n-classes', type=int, dest='num_classes', default=8)
     args.add_argument('-nf', '--n-features', type=int, dest='num_features', default=256)
@@ -128,8 +129,14 @@ def main():
         # print(model.state_dict().keys())
         load_my_state_dict(model, save)
         del save
-        if torch.cuda.device_count() > 1:
-            model = nn.DataParallel(model)
+
+    elif args.model_type == 'LHG':
+        heads = {'hm': 8}
+        model = create_model('hourglass', heads, 256)
+        model = model.cuda()
+
+    if torch.cuda.device_count() > 1 and not isinstance(model, nn.DataParallel):
+        model = nn.DataParallel(model)
 
     print('Number of model parameters: {}'.format(
         sum([p.data.nelement() for p in model.parameters()])))
@@ -149,7 +156,7 @@ def main():
     transform_test = Compose(albu_list, p=1)
     test_dataset = CarDatasetUnsup(test, test_images_dir, sigma=args.sigma, training= args.unsupervise != 0, transform=transform_test,
                                    normalized=args.normalized)
-    test_loader = DataLoader(dataset=test_dataset, batch_size=BATCH_SIZE // 2, shuffle=True, num_workers=4)
+    test_loader = DataLoader(dataset=test_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
 
     for epoch in range(n_epochs):
         torch.cuda.empty_cache()

@@ -352,6 +352,7 @@ def train_model(save_dir, model, epoch, train_loader, test_loader, device, optim
         if type(output) is list:
             loss = 0
             for idx, stack_output in enumerate(output):
+                stack_output = stack_output['hm'] if type(stack_output) is dict else stack_output
                 loss_turn, clf_loss, regr_loss = criterion(stack_output, mask_batch, regr_batch, heatmap_batch,
                                                            size_average=True, loss_type=args.loss_type,
                                                            alpha=args.alpha, beta=args.beta,
@@ -435,6 +436,7 @@ def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, histor
 
             if type(output) is list:
                 for idx, stack_output in enumerate(output):
+                    stack_output = stack_output['hm'] if type(stack_output) is dict else stack_output
                     loss_turn, clf_loss, regr_loss = criterion(stack_output, mask_batch, regr_batch, heatmap_batch,
                                                                size_average=True, loss_type=args.loss_type,
                                                                alpha=args.alpha, beta=args.beta, gamma=args.gamma)

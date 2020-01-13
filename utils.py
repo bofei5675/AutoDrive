@@ -287,7 +287,6 @@ def add_number_of_cars(df):
 
 
 def remove_out_image_cars(df):
-    print(df.head())
     def isnot_out(x, y):
         # are x,y coordinates within boundaries of the image
         return (x >= 0) & (x <= IMG_SHAPE[1]) & (y >= 0) & (y <= IMG_SHAPE[0])
@@ -316,7 +315,6 @@ def remove_out_image_cars(df):
           "out of all", df['numcars'].sum(), " cars in train")
     df = df[['ImageId', 'new_pred_string']]
     df.rename(columns={'new_pred_string': 'PredictionString'}, inplace=True)
-    print(df.head())
     return df
 
 

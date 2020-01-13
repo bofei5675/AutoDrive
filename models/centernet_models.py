@@ -8,12 +8,11 @@ import torch.nn as nn
 import os
 
 from .networks.msra_resnet import get_pose_net
-from .networks.resnet_dcn import get_pose_net as get_pose_net_dcn
+#from .networks.resnet_dcn import get_pose_net as get_pose_net_dcn
 from .networks.large_hourglass import get_large_hourglass_net
 
 _model_factory = {
   'res': get_pose_net, # default Resnet with deconv
-  'resdcn': get_pose_net_dcn,
   'hourglass': get_large_hourglass_net,
 }
 

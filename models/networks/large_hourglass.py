@@ -13,7 +13,7 @@ from __future__ import print_function
 import numpy as np
 import torch
 import torch.nn as nn
-
+import torch.nn.functional as F
 
 class convolution(nn.Module):
     def __init__(self, k, inp_dim, out_dim, stride=1, with_bn=True):
@@ -107,10 +107,14 @@ def make_merge_layer(dim):
 def make_pool_layer(dim):
     return nn.Sequential()
 
-
+'''
 def make_unpool_layer(dim):
+    size = up1.shape[2:]
+    up2 = self.up2(low3, size=size, mode='bilinear')
     return nn.Upsample(scale_factor=2)
-
+'''
+def make_unpool_layer(dim):
+    return F.upsample_nearest
 
 def make_kp_layer(cnv_dim, curr_dim, out_dim):
     return nn.Sequential(
@@ -183,7 +187,8 @@ class kp_module(nn.Module):
         low1 = self.low1(max1)
         low2 = self.low2(low1)
         low3 = self.low3(low2)
-        up2 = self.up2(low3)
+        size = up1.shape[2:]
+        up2 = self.up2(low3, size=size)
         return self.merge(up1, up2)
 
 
