@@ -1,5 +1,5 @@
 from utils import *
-from train import CarDataset, CarDatasetUnsup, train_model, evaluate_model
+from train import CarDataset, CarDatasetUnsup, train_model, evaluate_model, load_model
 from torch.optim import lr_scheduler
 from sklearn.model_selection import train_test_split
 import torch
@@ -62,6 +62,8 @@ def parse_args():
                       default=0)
     args.add_argument('-norm', '--normalized', type=str2bool, dest='normalized',
                       help='If use pre-computed value to normalize images', default='no')
+    args.add_argument('-lr', '--learning-rate', type=float, dest='lr',
+                      help='learning rate', default=1e-3)
 
     return args.parse_args()
 
@@ -70,6 +72,7 @@ def main():
     args = parse_args()
     current_time = time.strftime("%Y-%m-%d_%H-%M-%S", time.gmtime())
     model_name = 'model_{}_stack_{}_feat_{}_g_{}_{}_' if args.prob <= 0 else 'model_aug_{}_stack_{}_feat_{}_g_{}_{}_'
+    model_name += 'pt_' if args.pre_train else ''
     model_name += 'cbam_' if args.use_cbam else ''
     model_name += 'unsup_' if args.unsupervise != 0 else ''
     model_name += 'norm_' if args.normalized else ''
@@ -134,18 +137,19 @@ def main():
         heads = {'hm': 8}
         model = create_model('hourglass', heads, 256)
         model = model.cuda()
+        if args.pre_train:
+            model_dir = './weights/ctdet_coco_hg.pth'
+            load_model(model, model_dir)
 
     if torch.cuda.device_count() > 1 and not isinstance(model, nn.DataParallel):
         model = nn.DataParallel(model)
 
     print('Number of model parameters: {}'.format(
         sum([p.data.nelement() for p in model.parameters()])))
-    if args.loss_type == 'FL':
-        lr = 1e-3
-    else:
-        lr = 1e-3
-    optimizer = optim.Adam(model.parameters(), lr=lr)
-    exp_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=max(n_epochs, 10) * len(train_loader) // 3, gamma=0.1)
+
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[5, 10, 15, 20, 25, 30, 35, 40, 45, 50], gamma=0.5)
+    # exp_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=max(n_epochs, 10) * len(train_loader) // 3, gamma=0.1)
     history = pd.DataFrame()
     best_loss = 1e6
 
@@ -162,20 +166,23 @@ def main():
         torch.cuda.empty_cache()
         gc.collect()
         train_loss, train_final_loss = train_model(save_dir, model, epoch, train_loader, test_loader, device,
-                                                   optimizer, exp_lr_scheduler, history,
+                                                   optimizer, history,
                                                     args)
         best_loss, eval_loss, clf_losses, regr_losses = evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, history, args)
+        cur_lr = optimizer.state_dict()['param_groups'][0]['lr']
         with open(save_dir + 'log.txt', 'a+') as f:
-            line = 'Epoch: {}; Train total loss: {:.3f}; Train final loss: {:.3f}; Eval final loss: {:.3f}; Clf loss: {:.3f}; Regr loss: {:.3f}; Best eval loss: {:.3f}\n' \
+            line = 'Epoch: {}; Train total loss: {:.3f}; Train final loss: {:.3f}; Eval final loss: {:.3f}; Clf loss: {:.3f}; Regr loss: {:.3f}; Best eval loss: {:.3f}; LR: {}\n' \
                 .format(epoch,
                         train_loss,
                         train_final_loss,
                         eval_loss,
                         clf_losses,
                         regr_losses,
-                        best_loss)
+                        best_loss,
+                        cur_lr)
             f.write(line)
         history.to_csv(save_dir + 'history.csv', index=False)
+        scheduler.step()
 
 
 if __name__ == '__main__':
