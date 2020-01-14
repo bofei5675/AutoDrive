@@ -326,3 +326,20 @@ def save_submission_file(test, save_dir, predictions, threshold, name=''):
     with open(save_dir + '/stats_{}_{}.txt'.format(name, threshold), 'a+') as f:
         f.write('Average:' + str(avg_cars) + '\n')
         f.write('Total:' + str(avg_cars) + '\n')
+
+
+def load_checkpoints(args):
+    save_dir = args.checkpoint
+    models = os.listdir(save_dir)
+    models = [i for i in models if 'model' in i]
+    models = sorted(models)
+    models = models[-1]
+
+    start_epoch = models.replace('.pth','')[models.find('_') + 1:]
+    start_epoch = int(start_epoch)
+    model = torch.load(os.path.join(save_dir, models))
+    if isinstance(model, nn.DataParallel):
+        model = model.module
+    print('Load checkpoints', models)
+    return model, start_epoch
+

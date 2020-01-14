@@ -8,6 +8,6 @@ from models.centernet_models import create_model
 
 heads = {'hm': 8}
 
-model = create_model('hourglass', heads, 256)
+model = create_model('res_34', heads, 0)
 
 print(model)

@@ -49,29 +49,28 @@ def main():
             output = model(img)
         if type(output) is list:
             output = output[-1]
+            output = output['hm'] if type(output) is dict else output
         output = output.data.cpu().numpy()
         for out, test_mask in zip(output, dropmasks):
             # get unprocessed value
-            print('Before:')
             coords = extract_coords(out, args.threshold)
             s = coords2str(coords)
             predictions.append(s)
-            test_mask = cv2.resize(test_mask[0], (IMG_WIDTH // MODEL_SCALE,  IMG_HEIGHT // MODEL_SCALE))
+            #test_mask = cv2.resize(test_mask[0], (IMG_WIDTH // MODEL_SCALE,  IMG_HEIGHT // MODEL_SCALE))
             # test_mask = np.where(test_mask > 255 // 2, 100, 0)  # subtract from logits
             #print(test_mask.shape, out[0].shape)
             #print(out[0].mean())
             #print(sth.sum())
-            out[0, test_mask > (255 // 2)] = -100
+            #out[0, test_mask > (255 // 2)] = -100
             #print(out[0].mean())
-            print('After:')
-            coords = extract_coords(out, args.threshold)
-            s = coords2str(coords)
-            predictions_dropmask.append(s)
+            #coords = extract_coords(out, args.threshold)
+            #s = coords2str(coords)
+            #predictions_dropmask.append(s)
 
     save_dir = load_model.split('/')[:-1]
     save_dir = '/'.join(save_dir)
     save_submission_file(test.copy(), save_dir, predictions, args.threshold, 'origin')
-    save_submission_file(test.copy(), save_dir, predictions_dropmask, args.threshold, 'drop')
+    #save_submission_file(test.copy(), save_dir, predictions_dropmask, args.threshold, 'drop')
 
 
 if __name__ == '__main__':

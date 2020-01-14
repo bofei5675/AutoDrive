@@ -332,8 +332,7 @@ import time
 def train_model(save_dir, model, epoch, train_loader, test_loader, device, optimizer, history=None, args=None):
     model.train()
     total_batches = len(train_loader)
-    total_stacks = args.num_stacks
-    stack_losses = np.zeros(total_stacks)
+    stack_losses = np.zeros(args.num_stacks) if 'res' not in args.model_type else np.zeros(1)
     epoch_loss = 0
     clf_losses = 0
     regr_losses = 0
@@ -423,7 +422,7 @@ def evaluate_model(model, epoch, dev_loader, device, best_loss, save_dir, histor
     model.eval()
     bar = tqdm(total=len(dev_loader), desc='Processing', ncols=90)
     with torch.no_grad():
-        stack_loss = np.zeros(args.num_stacks)
+        stack_loss = np.zeros(args.num_stacks) if 'res' not in args.model_type else np.zeros(1)
         clf_losses = 0
         regr_losses = 0
         for img_batch, mask_batch, regr_batch, heatmap_batch, _ in dev_loader:

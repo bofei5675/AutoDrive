@@ -8,4 +8,4 @@
 
 source activate capstone
 cd ../
-python make_prediction.py -lm /scratch/bz1030/auto_drive/run/model_aug_HG2_stack_4_feat_256_g_40.0_FL_2020-01-11_04-14-07/model_27.pth -t 0
+python make_prediction.py -lm /scratch/bz1030/auto_drive/run/model_aug_HG2_stack_4_feat_256_g_60.0_FL_2020-01-12_15-01-19/model_25.pth -t -0.75
