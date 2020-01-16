@@ -31,6 +31,7 @@ MANIFEST
 *.pth
 *.csv
 *.txt
+resnet/
 run/
 data/
 weights/

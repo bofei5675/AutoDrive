@@ -42,25 +42,27 @@ def main():
     else:
         model = torch.load(load_model, map_location='cpu')
 
-
+    if isinstance(model, torch.nn.DataParallel):
+        model = model.module
     model.eval()
     print('Start Evaluation ...')
     fig_id = 0
-    for img, mask, regr, heatmap in tqdm(test_dataset):
-        print(np.where(mask > 0))
+    for img, mask, regr, heatmap, dropmasks in tqdm(test_dataset):
         fig, axes = plt.subplots(5, 1, figsize=(16, 16))
+        img2show = img.data.cpu().numpy()
+        img = img.unsqueeze(0)
         axes[0].set_title('Input image')
-        axes[0].imshow(np.rollaxis(img, 0, 3))
+        axes[0].imshow(np.rollaxis(img2show, 0, 3))
 
         axes[1].set_title('Ground truth mask')
         axes[1].imshow(mask)
+        with torch.no_grad():
+            output = model(img.to(device))
 
-        output = model(torch.tensor(img[None]).to(device))
         if type(output) is list:
             output = output[-1]
-
+            output = output['hm'] if type(output) is dict else output
         logits = output[0, 0].data.cpu().numpy()
-
         axes[2].set_title('Model predictions')
         axes[2].imshow(logits)
 

@@ -8,4 +8,4 @@
 
 source activate capstone
 cd ../
-python pred_visualization.py -lm /scratch/bz1030/auto_drive/run/model_aug_HG2_stack_4_feat_256_g_10.0_FL_2020-01-09_07-08-01/model_16.pth
+python pred_visualization.py -lm /scratch/bz1030/auto_drive/resnet/model_aug_res_50_stack_2_feat_256_g_40.0_FL_pt_2020-01-14_02-30-38/model_32.pth

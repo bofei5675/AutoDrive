@@ -39,7 +39,6 @@ def main():
     if isinstance(model, torch.nn.DataParallel):
         model = model.module
     test_loader = DataLoader(dataset=test_dataset, batch_size=4, shuffle=False, num_workers=4)
-
     model.eval()
     print('Start Evaluation ...')
     for img, _, _, _, dropmasks in tqdm(test_loader):
